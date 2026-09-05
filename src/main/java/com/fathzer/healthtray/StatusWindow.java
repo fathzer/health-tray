@@ -3,6 +3,7 @@ package com.fathzer.healthtray;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Frame;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -87,7 +88,7 @@ public class StatusWindow implements CheckTask.Listener {
 	/** Refreshes the table from the tasks and makes the window visible. Must be called on the EDT. */
 	public void show() {
 		refresh();
-		frame.setState(JFrame.NORMAL);
+		frame.setState(Frame.NORMAL);
 		frame.setVisible(true);
 		frame.toFront();
 		frame.requestFocus();

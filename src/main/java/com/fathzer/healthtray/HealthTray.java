@@ -401,7 +401,6 @@ public class HealthTray {
 
 	/** Saves the current state, shuts down the scheduler and exits the application. */
 	private static void quit() {
-		System.out.println("Quitting...");
 		if (persistence != null && tasks != null) {
 			try {
 				persistence.save(tasks);
