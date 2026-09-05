@@ -166,6 +166,55 @@ The merge logic on startup is:
   from the saved state, and `lastChange` is taken from the saved state only if the saved status
   was already `ERROR` (otherwise it's a new error, so `lastChange` is null).
 
+## No-tray mode (GNOME Shell and others)
+
+Some desktop environments — notably **GNOME Shell** (default on Ubuntu) — do not respect the
+alpha channel of system-tray icons and fill transparent areas with white. This results in an
+ugly white rectangle around the icon.
+
+To work around this, health-tray can run in **no-tray mode**, where the system-tray icon is
+skipped entirely. Instead, a compact, persistent, **draggable notification** is displayed in
+the bottom-right corner of the screen. This notification serves as the primary interaction
+point:
+
+- It shows a small heart icon that changes color (grey during initialization, then green or red).
+- **Clicking it** opens the status window (which has a "Quit" button to exit the application).
+- It has **no close button** — the only way to quit is via the status window's "Quit" button.
+- It can be **dragged** anywhere on the screen by clicking and holding.
+
+### Automatic detection
+
+No-tray mode is **auto-detected** on GNOME-based desktops via the `XDG_CURRENT_DESKTOP`
+environment variable. If it contains `GNOME` (case-insensitive), no-tray mode is activated
+automatically.
+
+### Manual override
+
+The system property `healthtray.noTray` forces the mode regardless of the desktop environment:
+
+| Value | Behavior |
+|-------|----------|
+| `true` | No-tray mode is forced (no system-tray icon, compact notification instead). |
+| `false` | Tray mode is forced (system-tray icon is used, even on GNOME). |
+| *(unset)* | Auto-detected: no-tray mode on GNOME, tray mode everywhere else. |
+
+Example:
+
+```bash
+java -Dhealthtray.noTray=true -jar my-app.jar   # force no-tray mode
+java -Dhealthtray.noTray=false -jar my-app.jar  # force tray mode (even on GNOME)
+```
+
+### Impact on the UI
+
+| Feature | Tray mode | No-tray mode |
+|---------|-----------|--------------|
+| System-tray icon | Heart icon (green/red/grey) | Not displayed |
+| Startup notification | Short one-shot ("Surveillance activée") | Persistent compact notification with heart icon |
+| Close notification | Close button available | No close button (quit via status window) |
+| Move notification | Not movable (managed by OS) | Draggable by the user |
+| Status window | Opened by clicking tray icon | Opened by clicking the compact notification |
+
 ## License
 
 See [LICENSE](LICENSE).

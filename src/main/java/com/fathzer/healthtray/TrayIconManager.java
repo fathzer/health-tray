@@ -6,38 +6,50 @@ import java.awt.TrayIcon;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.function.Consumer;
 
 import javax.imageio.ImageIO;
 
-/** Manages the system tray icon, changing its color based on the overall health of all {@link CheckTask}s.
+/** Manages an icon that reflects the overall health of all {@link CheckTask}s.
  * <BR>When all tasks are {@link CheckTask.Status#OK OK}, a green-tinted icon is displayed.
  * <BR>When at least one task is in {@link CheckTask.Status#ERROR ERROR}, a red-tinted icon is displayed.
  * <BR>The icon is swapped only when the overall state actually changes.
+ * <BR>This can be used to update a {@link TrayIcon} (in tray mode) or any other icon display
+ * (e.g. a dorkbox Notify notification in no-tray mode) via a {@link Consumer<Image>}.
  */
 public class TrayIconManager implements CheckTask.Listener {
 	private static final String HEART_RESOURCE = "/com/fathzer/healthtray/heart.png";
 
-	private final TrayIcon trayIcon;
+	private final Consumer<Image> iconSetter;
 	private final List<CheckTask> tasks;
 	private final Image okIcon;
 	private final Image errorIcon;
+	private final Image greyIcon;
 	private boolean anyError = false;
 
-	/** Creates a tray icon manager and subscribes to the given tasks.
+	/** Creates a tray icon manager for a {@link TrayIcon} and subscribes to the given tasks.
 	 * @param trayIcon the system tray icon to update.
 	 * @param tasks the tasks to monitor for state changes.
 	 */
 	public TrayIconManager(TrayIcon trayIcon, List<CheckTask> tasks) {
-		this.trayIcon = trayIcon;
+		this(trayIcon::setImage, tasks);
+	}
+
+	/** Creates an icon manager that updates the icon via the given {@link Consumer} and subscribes to the given tasks.
+	 * @param iconSetter called with the new icon image whenever the overall state changes.
+	 * @param tasks the tasks to monitor for state changes.
+	 */
+	public TrayIconManager(Consumer<Image> iconSetter, List<CheckTask> tasks) {
+		this.iconSetter = iconSetter;
 		this.tasks = tasks;
 		BufferedImage heart = loadHeart();
-		this.okIcon = heart == null ? null : tint(heart, 0x00, 0xE6, 0x76);
-		this.errorIcon = heart == null ? null : tint(heart, 0xFF, 0x17, 0x49);
-		// Set the initial icon (green, assuming no errors yet).
-		if (okIcon != null) {
-			trayIcon.setImage(okIcon);
-		}
+		this.okIcon = tint(heart, 0x00, 0xE6, 0x76);
+		this.errorIcon = tint(heart, 0xFF, 0x17, 0x49);
+		this.greyIcon = tint(heart, 0x88, 0x88, 0x88);
+		// Set the initial icon to grey (initializing state).
+		iconSetter.accept(greyIcon);
 		for (CheckTask task : tasks) {
 			task.addListener(this);
 		}
@@ -45,19 +57,37 @@ public class TrayIconManager implements CheckTask.Listener {
 
 	@Override
 	public void onStateChange(CheckTask task, CheckTask.Status oldStatus, CheckTask.Status newStatus) {
+		refreshIcon();
+	}
+
+	/** Recomputes the overall state from all tasks and updates the icon if it changed. */
+	private void refreshIcon() {
 		boolean wasError = anyError;
 		anyError = tasks.stream().anyMatch(t -> t.getStatus() == CheckTask.Status.ERROR);
 		if (anyError != wasError) {
-			trayIcon.setImage(anyError ? errorIcon : okIcon);
+			iconSetter.accept(anyError ? errorIcon : okIcon);
 		}
+	}
+
+	/** Updates the icon to reflect the current state of all tasks.
+	 * <BR>This should be called after all tasks have been initialized, to switch from the grey
+	 * "initializing" icon to the actual green/red state.
+	 */
+	public void updateFromCurrentState() {
+		anyError = tasks.stream().anyMatch(t -> t.getStatus() == CheckTask.Status.ERROR);
+		iconSetter.accept(anyError ? errorIcon : okIcon);
 	}
 
 	/** Loads the heart icon resource as a {@link BufferedImage}. */
 	static BufferedImage loadHeart() {
 		try (InputStream in = TrayIconManager.class.getResourceAsStream(HEART_RESOURCE)) {
-			if (in == null) return null;
+			if (in == null) {
+				throw new IOException("Heart icon resource not found: " + HEART_RESOURCE);
+			}
 			BufferedImage img = ImageIO.read(in);
-			if (img == null) return null;
+			if (img == null) {
+				throw new IOException("Failed to read heart icon from resource: " + HEART_RESOURCE);
+			}
 			if (img.getType() == BufferedImage.TYPE_INT_ARGB) return img;
 			BufferedImage converted = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
 			Graphics2D g = converted.createGraphics();
@@ -65,7 +95,7 @@ public class TrayIconManager implements CheckTask.Listener {
 			g.dispose();
 			return converted;
 		} catch (IOException e) {
-			return null;
+			throw new UncheckedIOException(e);
 		}
 	}
 

@@ -4,23 +4,27 @@ import java.awt.AWTException;
 import java.awt.Image;
 import java.awt.SystemTray;
 import java.awt.TrayIcon;
+import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.swing.ImageIcon;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
@@ -32,6 +36,12 @@ import kotlin.Unit;
 /** A reusable system-tray application that monitors the health of {@link CheckTask}s.
  * <BR>Displays a small heart icon in the system tray. Clicking the icon (or a notification) opens
  * a window showing the current state of every task.
+ * <BR>On desktop environments where the system tray is not available or buggy (notably GNOME Shell,
+ * which does not respect tray icon transparency), the tray icon can be skipped entirely by setting
+ * the {@code -Dhealthtray.noTray=true} system property. This is auto-detected on GNOME via the
+ * {@code XDG_CURRENT_DESKTOP} environment variable. In that case, the startup notification becomes
+ * persistent (no auto-close, no close button) and can be dragged — it becomes the primary way to
+ * interact with the application. Clicking it opens the status window, which has a "Quit" button.
  * <BR>On startup, a notification is shown, then each task's {@link CheckTask#init() init()} runs
  * immediately and {@link CheckTask#run() run()} is executed every {@link CheckTask#getPeriod() period}
  * seconds. When a task transitions to {@link CheckTask.Status#ERROR}, a persistent notification is
@@ -46,11 +56,13 @@ public class HealthTray {
 	private static final Logger LOGGER = Logger.getLogger(HealthTray.class.getName());
 	private static final int NOTIFICATION_DURATION_MS = 10_000;
 	private static final Path DEFAULT_STATE_FILE = Path.of("health-state.properties");
+	private static final String NO_TRAY_PROP = "healthtray.noTray";
 
 	private static ScheduledExecutorService scheduler;
 	private static NotificationManager notificationManager;
 	private static List<CheckTask> tasks;
 	private static StatePersistence persistence;
+	private static Notify startupNotification;
 
 	private HealthTray() {
 		// To prevent instantiation
@@ -76,19 +88,15 @@ public class HealthTray {
 	}
 
 	private static void start(List<CheckTask> originalTasks, Path stateFile) {
-		try {
-			for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
-				if ("Nimbus".equals(info.getName())) {
-					UIManager.setLookAndFeel(info.getClassName());
-					break;
-				}
-			}
-		} catch (Exception e) {
-			LOGGER.log(Level.FINE, "Nimbus look and feel unavailable, using default", e);
-		}
+		setupLookAndFeel();
 		if (!SystemTray.isSupported()) {
 			LOGGER.severe("System tray is not supported on this platform");
 			return;
+		}
+
+		boolean noTray = isNoTrayMode();
+		if (noTray) {
+			LOGGER.info("Tray icon disabled (no-tray mode). The startup notification will be persistent.");
 		}
 
 		persistence = new StatePersistence(stateFile);
@@ -97,7 +105,7 @@ public class HealthTray {
 		List<String> duplicates = findDuplicateNames(originalTasks);
 		boolean hasDuplicates = !duplicates.isEmpty();
 		if (hasDuplicates) {
-			LOGGER.severe("Duplicate task names detected: " + duplicates + ". No checks will be loaded.");
+			LOGGER.severe(() -> "Duplicate task names detected: " + duplicates + ". No checks will be loaded.");
 		}
 		final List<CheckTask> activeTasks = hasDuplicates ? List.of() : originalTasks;
 		HealthTray.tasks = activeTasks;
@@ -106,51 +114,20 @@ public class HealthTray {
 		StatusWindow statusWindow = new StatusWindow(activeTasks, notificationManager::restore, HealthTray::quit);
 		notificationManager.setOnNotificationClick(statusWindow::showOnEdt);
 
-		SystemTray tray = SystemTray.getSystemTray();
 		BufferedImage heart = TrayIconManager.loadHeart();
-		Image initialIcon = hasDuplicates
-				? (heart == null ? new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB) : TrayIconManager.tint(heart, 0x88, 0x88, 0x88))
-				: new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
-		TrayIcon icon = new TrayIcon(initialIcon, hasDuplicates ? "HealthTray - ERROR" : "HealthTray");
-		icon.setImageAutoSize(true);
-		// Single left-click (and double-click) on the tray icon opens the status window.
-		icon.addActionListener(e -> statusWindow.show());
-		icon.addMouseListener(new MouseAdapter() {
-			@Override
-			public void mouseClicked(MouseEvent e) {
-				if ((e.getModifiersEx() & InputEvent.BUTTON1_DOWN_MASK) != 0
-						|| e.getButton() == MouseEvent.BUTTON1) {
-					statusWindow.show();
-				}
-			}
-		});
-		if (!hasDuplicates) {
-			new TrayIconManager(icon, activeTasks);
+		TrayIcon icon = createTrayIcon(hasDuplicates, noTray, statusWindow, heart);
+		if (icon == null && !noTray) {
+			return; // Tray icon creation failed
 		}
-		try {
-			tray.add(icon);
-		} catch (AWTException e) {
-			LOGGER.log(Level.SEVERE, "Unable to add icon to system tray", e);
-			return;
-		}
+
+		// The TrayIconManager (if created) starts with a grey "initializing" icon.
+		// It is created inside showStartupNotification, attached to the tray icon or the notification.
 		if (hasDuplicates) {
-			String message = "Duplicate task names: " + String.join(", ", duplicates) + ". No checks loaded.";
-			Notify notify = Notify.Companion.create()
-					.title("HealthTray - Configuration error")
-					.text(message)
-					.theme(Theme.Companion.getDefaultDark())
-					.position(Position.BOTTOM_RIGHT)
-					.onClickAction(n -> {
-						statusWindow.showOnEdt();
-						return Unit.INSTANCE;
-					});
-			if (heart != null) {
-				notify.image(TrayIconManager.tint(heart, 0x88, 0x88, 0x88));
-			}
-			notify.showError();
+			showDuplicateNotification(duplicates, noTray, statusWindow, heart);
 		} else {
-			notify("HealthTray", "Surveillance activée", CheckTask.Status.OK, statusWindow::showOnEdt);
-			scheduleChecks(activeTasks);
+			TrayIconManager iconManager = showStartupNotification(noTray, activeTasks, statusWindow, icon);
+			// Run init() for all tasks in parallel (off the EDT), then schedule periodic checks.
+			initAndSchedule(activeTasks, iconManager);
 		}
 		// Ensure state is saved even on unexpected shutdown (Ctrl+C, etc.).
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -162,6 +139,182 @@ public class HealthTray {
 				}
 			}
 		}, "state-save"));
+	}
+
+	/** Sets the Nimbus look and feel if available, otherwise falls back to the default.
+	 * <br>Failure to set Nimbus is non-fatal and logged at {@code FINE} level.
+	 */
+	private static void setupLookAndFeel() {
+		try {
+			for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
+				if ("Nimbus".equals(info.getName())) {
+					UIManager.setLookAndFeel(info.getClassName());
+					break;
+				}
+			}
+		} catch (Exception e) {
+			LOGGER.log(Level.FINE, "Nimbus look and feel unavailable, using default", e);
+		}
+	}
+
+	/** Creates and registers the system tray icon, wiring up click handlers to open the status window.
+	 * <br>Note: this method does not create a {@link TrayIconManager}; the caller is responsible for
+	 * creating one (so it can later call {@link TrayIconManager#updateFromCurrentState()} after init).
+	 * @param hasDuplicates whether duplicate task names were detected.
+	 * @param noTray if {@code true}, the tray icon is skipped and this method returns {@code null}.
+	 * @param statusWindow the status window to open when the icon is clicked.
+	 * @param heart the base heart image used for the icon.
+	 * @return the created {@link TrayIcon}, or {@code null} if {@code noTray} is {@code true} or the
+	 *         icon could not be added to the system tray.
+	 */
+	private static TrayIcon createTrayIcon(boolean hasDuplicates, boolean noTray,
+			StatusWindow statusWindow, BufferedImage heart) {
+		if (noTray) {
+			return null;
+		}
+		SystemTray tray = SystemTray.getSystemTray();
+		Image initialIcon = hasDuplicates
+				? TrayIconManager.tint(heart, 0x88, 0x88, 0x88)
+				: new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+		TrayIcon icon = new TrayIcon(initialIcon, hasDuplicates ? "HealthTray - ERROR" : "HealthTray");
+		icon.setImageAutoSize(true);
+		icon.addActionListener(e -> statusWindow.show());
+		icon.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				if ((e.getModifiersEx() & InputEvent.BUTTON1_DOWN_MASK) != 0
+						|| e.getButton() == MouseEvent.BUTTON1) {
+					statusWindow.show();
+				}
+			}
+		});
+		try {
+			tray.add(icon);
+		} catch (AWTException e) {
+			LOGGER.log(Level.SEVERE, "Unable to add icon to system tray", e);
+			return null;
+		}
+		return icon;
+	}
+
+	/** Shows a notification alerting the user that duplicate task names were detected and no checks were loaded.
+	 * <br>In no-tray mode, a compact persistent notification is used. Otherwise, a standard error
+	 * notification is displayed. Clicking either notification opens the status window.
+	 * @param duplicates the list of duplicate task names.
+	 * @param noTray whether the tray icon is disabled (no-tray mode).
+	 * @param statusWindow the status window to open when the notification is clicked.
+	 * @param heart the base heart image, tinted grey for the error icon.
+	 */
+	private static void showDuplicateNotification(List<String> duplicates, boolean noTray,
+			StatusWindow statusWindow, BufferedImage heart) {
+		String message = "Duplicate task names: " + String.join(", ", duplicates) + ". No checks loaded.";
+		if (noTray) {
+			Notify notify = showCompactNotification("Health Tray Off", statusWindow::showOnEdt);
+			notify.setImage(new ImageIcon(TrayIconManager.tint(heart, 0x88, 0x88, 0x88).getScaledInstance(20, 20, Image.SCALE_SMOOTH)));
+		} else {
+			Notify notify = Notify.Companion.create()
+					.title("HealthTray - Configuration error")
+					.text(message)
+					.theme(Theme.Companion.getDefaultDark())
+					.position(Position.BOTTOM_RIGHT)
+					.onClickAction(n -> {
+						statusWindow.showOnEdt();
+						return Unit.INSTANCE;
+					});
+			notify.image(TrayIconManager.tint(heart, 0x88, 0x88, 0x88));
+			notify.showError();
+		}
+	}
+
+	/** Shows the startup notification when all tasks are valid and creates a {@link TrayIconManager}.
+	 * <br>In no-tray mode, a compact persistent notification replaces the tray icon and a
+	 * {@link TrayIconManager} is attached to it so its icon changes color with the overall state.
+	 * Otherwise, a short one-shot "Surveillance activée" notification is displayed and the
+	 * {@link TrayIconManager} is attached to the tray icon.
+	 * @param noTray whether the tray icon is disabled (no-tray mode).
+	 * @param activeTasks the tasks to monitor.
+	 * @param statusWindow the status window to open when the notification is clicked.
+	 * @param icon the tray icon (non-null in tray mode, null in no-tray mode).
+	 * @return the created {@link TrayIconManager} (starting with a grey "initializing" icon).
+	 */
+	private static TrayIconManager showStartupNotification(boolean noTray, List<CheckTask> activeTasks,
+			StatusWindow statusWindow, TrayIcon icon) {
+		if (noTray) {
+			Notify notify = showCompactNotification("Health Tray On", statusWindow::showOnEdt);
+			startupNotification = notify;
+			return new TrayIconManager(img -> notify.setImage(new ImageIcon(img.getScaledInstance(20, 20, Image.SCALE_SMOOTH))), activeTasks);
+		} else {
+			startupNotification = notify("HealthTray", "Surveillance activée", CheckTask.Status.OK, statusWindow::showOnEdt);
+			return new TrayIconManager(icon, activeTasks);
+		}
+	}
+
+	/** Determines whether the tray icon should be skipped entirely.
+	 * <BR>This is controlled by the {@code healthtray.noTray} system property:
+	 * <ul>
+	 *   <li>{@code true} or {@code false} forces the corresponding mode.</li>
+	 *   <li>If unset, GNOME Shell is auto-detected via the {@code XDG_CURRENT_DESKTOP}
+	 *       environment variable (which contains {@code GNOME} on GNOME-based desktops).</li>
+	 * </ul>
+	 * @return {@code true} if the tray icon should not be displayed.
+	 */
+	private static boolean isNoTrayMode() {
+		String prop = System.getProperty(NO_TRAY_PROP);
+		if (prop != null) {
+			return Boolean.parseBoolean(prop);
+		}
+		String xdg = System.getenv("XDG_CURRENT_DESKTOP");
+		return xdg != null && xdg.toUpperCase().contains("GNOME");
+	}
+
+	/** Shows a compact, persistent, draggable notification (used in no-tray mode).
+	 * <BR>The notification has no body text, no close button, and no initial icon (the icon is
+	 * managed externally, typically by a {@link TrayIconManager} that updates it based on task state).
+	 * It stays visible until the application exits. Clicking it runs the provided {@code onClick} action.
+	 * @param title the title to display (e.g. "Health Tray On" or "Health Tray Off").
+	 * @param onClick action invoked when the user clicks the notification.
+	 * @return the created {@link Notify} instance, so callers can update its icon (e.g. via {@code setImage}).
+	 */
+	private static Notify showCompactNotification(String title, Runnable onClick) {
+		int originalHeight = Notify.Companion.getHEIGHT();
+		Notify.Companion.setHEIGHT(50);
+		try {
+			Notify notify = Notify.Companion.create()
+					.title(title)
+					.text("")
+					.theme(Theme.Companion.getDefaultDark())
+					.position(Position.BOTTOM_RIGHT)
+					.hideCloseButton()
+					.onClickAction(n -> {
+						onClick.run();
+						return Unit.INSTANCE;
+					});
+			notify.show();
+			makeDraggable(notify);
+			return notify;
+		} finally {
+			Notify.Companion.setHEIGHT(originalHeight);
+		}
+	}
+
+	/** Makes a dorkbox {@link Notify} notification draggable by the user.
+	 * <BR>This uses reflection to access the internal {@code JWindow} (DesktopNotify) and adds
+	 * a mouse motion listener that allows the user to drag the notification around the screen.
+	 * <BR>This must be called AFTER the notification has been shown (e.g. after {@code showInformation()},
+	 * {@code showError()}, etc.), so that the internal popup window exists.
+	 * @param notify the notification to make draggable.
+	 */
+	private static void makeDraggable(Notify notify) {
+		try {
+			Field popupField = Notify.class.getDeclaredField("notifyPopup");
+			popupField.setAccessible(true);
+			Object popup = popupField.get(notify);
+			if (popup instanceof Window window) {
+				Dragger.attach(window);
+			}
+		} catch (NoSuchFieldException | IllegalAccessException e) {
+			LOGGER.log(Level.FINE, "Unable to make notification draggable (reflection failed)", e);
+		}
 	}
 
 	/** @return the list of task names that appear more than once, or an empty list if all names are unique. */
@@ -176,33 +329,58 @@ public class HealthTray {
 		return List.copyOf(duplicates);
 	}
 
-	private static void scheduleChecks(List<CheckTask> tasks) {
+	/** Initializes all tasks in parallel (off the EDT), then switches the icon from grey to the
+	 * actual green/red state and starts the periodic scheduling.
+	 * <BR>The init phase runs on a separate thread pool so the EDT is not blocked. Once all inits
+	 * complete, {@link TrayIconManager#updateFromCurrentState()} is called on the EDT to refresh the
+	 * icon, and the periodic scheduler is started.
+	 * @param tasks the tasks to initialize and schedule.
+	 * @param iconManager the icon manager to update after init (may be null if no icon is managed).
+	 */
+	private static void initAndSchedule(List<CheckTask> tasks, TrayIconManager iconManager) {
 		// Load saved state (if any) before running init.
-		Map<String, CheckTask.SavedState> savedStates = new HashMap<>();
+		Map<String, CheckTask.SavedState> loadedStates;
 		try {
-			savedStates = persistence.load();
+			loadedStates = persistence.load();
 		} catch (IOException e) {
 			LOGGER.log(Level.WARNING, "Unable to load saved state, starting fresh", e);
+			loadedStates = new HashMap<>();
 		}
-		scheduler = Executors.newScheduledThreadPool(tasks.size(), r -> {
-			Thread t = new Thread(r, "health-check");
-			t.setDaemon(true);
-			return t;
-		});
-		for (CheckTask task : tasks) {
-			CheckTask.SavedState saved = savedStates.get(task.getName());
-			if (saved != null) {
-				task.initWithRestore(saved);
-			} else {
-				task.init();
-			}
-			long period = task.getPeriod();
-			scheduler.scheduleAtFixedRate(task::run, period, period, TimeUnit.SECONDS);
-		}
+		final Map<String, CheckTask.SavedState> savedStates = loadedStates;
+		// Run all inits in parallel, then schedule on completion.
+		List<CompletableFuture<Void>> initFutures = tasks.stream()
+				.map(task -> CompletableFuture.runAsync(() -> {
+					CheckTask.SavedState saved = savedStates.get(task.getName());
+					if (saved != null) {
+						task.initWithRestore(saved);
+					} else {
+						task.init();
+					}
+				}))
+				.toList();
+		CompletableFuture.allOf(initFutures.toArray(new CompletableFuture[0]))
+				.thenRun(() -> {
+					// All inits are done: update the icon to reflect the actual state, then schedule.
+					SwingUtilities.invokeLater(() -> {
+						if (iconManager != null) {
+							iconManager.updateFromCurrentState();
+						}
+						scheduler = Executors.newScheduledThreadPool(tasks.size(), r -> {
+							Thread t = new Thread(r, "health-check");
+							t.setDaemon(true);
+							return t;
+						});
+						for (CheckTask task : tasks) {
+							long period = task.getPeriod();
+							scheduler.scheduleAtFixedRate(task::run, period, period, TimeUnit.SECONDS);
+						}
+					});
+				});
 	}
 
-	/** Shows a one-shot notification (used for the startup message). */
-	private static void notify(String title, String message, CheckTask.Status status, Runnable onClick) {
+	/** Shows a one-shot notification (used for the startup message).
+	 * @return the created {@link Notify} instance, so callers can close it on quit. */
+	private static Notify notify(String title, String message, CheckTask.Status status, Runnable onClick) {
 		Notify notify = Notify.Companion.create()
 				.title(title)
 				.text(message)
@@ -218,10 +396,12 @@ public class HealthTray {
 		} else {
 			notify.showInformation();
 		}
+		return notify;
 	}
 
 	/** Saves the current state, shuts down the scheduler and exits the application. */
 	private static void quit() {
+		System.out.println("Quitting...");
 		if (persistence != null && tasks != null) {
 			try {
 				persistence.save(tasks);
@@ -231,6 +411,9 @@ public class HealthTray {
 		}
 		if (notificationManager != null) {
 			notificationManager.closeAll();
+		}
+		if (startupNotification != null) {
+			startupNotification.close();
 		}
 		if (scheduler != null) {
 			scheduler.shutdownNow();

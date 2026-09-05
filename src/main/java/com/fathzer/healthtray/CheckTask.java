@@ -19,6 +19,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * Subclasses implement {@link #doInit()} and {@link #doRun()} to perform the actual check logic.
  */
 public abstract class CheckTask {
+	public static final TaskResult OK = new TaskResult(Status.OK, "");
+	
     public record TaskResult(Status type, String message) {}
 
     public enum Status {
@@ -130,9 +132,9 @@ public abstract class CheckTask {
         return result;
     }
 
-    /** Performs the initial check. Defaults to calling {@link #doRun()}. */
+    /** Performs the initial check. Defaults does nothing and returns OK. */
     protected TaskResult doInit() {
-        return doRun();
+        return OK;
     }
 
     /** Performs a periodic check. */
