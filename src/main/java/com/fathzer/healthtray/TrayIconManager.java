@@ -12,6 +12,8 @@ import java.util.function.Consumer;
 
 import javax.imageio.ImageIO;
 
+import com.fathzer.healthtray.tasks.CheckTask;
+
 /** Manages an icon that reflects the overall health of all {@link CheckTask}s.
  * <BR>When all tasks are {@link CheckTask.Status#OK OK}, a green-tinted icon is displayed.
  * <BR>When at least one task is in {@link CheckTask.Status#ERROR ERROR}, a red-tinted icon is displayed.
@@ -19,7 +21,7 @@ import javax.imageio.ImageIO;
  * <BR>This can be used to update a {@link TrayIcon} (in tray mode) or any other icon display
  * (e.g. a dorkbox Notify notification in no-tray mode) via a {@link Consumer<Image>}.
  */
-public class TrayIconManager implements CheckTask.Listener {
+class TrayIconManager implements CheckTask.Listener {
 	private static final String HEART_RESOURCE = "/com/fathzer/healthtray/heart.png";
 
 	private final Consumer<Image> iconSetter;

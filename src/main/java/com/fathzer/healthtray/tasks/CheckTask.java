@@ -1,4 +1,4 @@
-package com.fathzer.healthtray;
+package com.fathzer.healthtray.tasks;
 
 import java.time.Instant;
 import java.util.List;

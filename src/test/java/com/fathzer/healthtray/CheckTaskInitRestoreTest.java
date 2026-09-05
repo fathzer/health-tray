@@ -8,10 +8,11 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-import com.fathzer.healthtray.CheckTask.Listener;
-import com.fathzer.healthtray.CheckTask.SavedState;
-import com.fathzer.healthtray.CheckTask.Status;
-import com.fathzer.healthtray.CheckTask.TaskResult;
+import com.fathzer.healthtray.tasks.CheckTask;
+import com.fathzer.healthtray.tasks.CheckTask.Listener;
+import com.fathzer.healthtray.tasks.CheckTask.SavedState;
+import com.fathzer.healthtray.tasks.CheckTask.Status;
+import com.fathzer.healthtray.tasks.CheckTask.TaskResult;
 
 /** Tests the merge logic of {@link CheckTask#initWithRestore(SavedState)}.
  * <BR>Verifies the four scenarios:

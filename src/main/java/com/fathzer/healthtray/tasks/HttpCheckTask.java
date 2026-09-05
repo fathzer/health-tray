@@ -1,4 +1,4 @@
-package com.fathzer.healthtray;
+package com.fathzer.healthtray.tasks;
 
 import java.io.IOException;
 import java.net.URI;

@@ -25,11 +25,13 @@ import javax.swing.WindowConstants;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
+import com.fathzer.healthtray.tasks.CheckTask;
+
 /** Window displaying the current state of every {@link CheckTask}.
  * <BR>The window subscribes to each task's {@link CheckTask.Listener#onCheckDone} event to refresh
  * the table in real-time (only while visible). Callers invoke {@link #show()} (on the EDT) to display it.
  */
-public class StatusWindow implements CheckTask.Listener {
+class StatusWindow implements CheckTask.Listener {
 	private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
 	private static final String[] COLUMNS = { "Name", "State", "Message", "Period", "Last check", "Last change" };
 

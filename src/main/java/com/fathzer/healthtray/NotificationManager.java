@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.fathzer.healthtray.tasks.CheckTask;
+
 import dorkbox.notify.Notify;
 import dorkbox.notify.Position;
 import dorkbox.notify.Theme;
@@ -16,7 +18,7 @@ import kotlin.Unit;
  *   <li>Transition from ERROR to {@link CheckTask.Status#OK}: closes the error notification and shows a short "{@code <name> is ok}" notification.</li>
  * </ul>
  */
-public class NotificationManager implements CheckTask.Listener {
+class NotificationManager implements CheckTask.Listener {
 	/** Duration (in ms) of the "recovered" notification shown when a task transitions back to OK. */
 	private static final int RECOVERY_DURATION_MS = 10_000;
 

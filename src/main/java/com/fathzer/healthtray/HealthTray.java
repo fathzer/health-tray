@@ -28,6 +28,8 @@ import javax.swing.ImageIcon;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
+import com.fathzer.healthtray.tasks.CheckTask;
+
 import dorkbox.notify.Notify;
 import dorkbox.notify.Position;
 import dorkbox.notify.Theme;
