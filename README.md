@@ -50,7 +50,7 @@ Create a list of `CheckTask` instances and launch the application:
 
 ```java
 import com.fathzer.healthtray.HealthTray;
-import com.fathzer.healthtray.HttpCheckTask;
+import com.fathzer.healthtray.tasks.HttpCheckTask;
 import java.util.List;
 
 public class MyApp {
@@ -74,7 +74,7 @@ Verifies that an HTTP(S) URL returns an accepted status code. Created via a buil
 
 ```java
 import java.util.Set;
-import com.fathzer.healthtray.HttpCheckTask;
+import com.fathzer.healthtray.tasks.HttpCheckTask;
 import com.fathzer.healthtray.CheckTask.Status;
 import com.fathzer.healthtray.CheckTask.TaskResult;
 
@@ -98,6 +98,88 @@ HttpCheckTask.builder("Internal API", "https://internal.example.com/health", 60)
         .proxy(ProxySelector.of(new InetSocketAddress("proxy.example.com", 8080)))
     .build();
 ```
+
+### FreshnessCheckTask
+
+Verifies that a source has been updated more recently than a maximum age.
+The source is represented by a [`TimestampSupplier`](#timestampsupplier) that returns
+the source's last update timestamp. The task reports `OK` when the source is fresh enough
+(i.e. `now - timestamp <= maxAge`), and `ERROR` when it is stale or unavailable.
+
+```java
+import java.time.Duration;
+import java.nio.file.Path;
+import com.fathzer.healthtray.tasks.FreshnessCheckTask;
+import com.fathzer.healthtray.tasks.TimestampSupplier;
+
+new FreshnessCheckTask("Backup freshness",
+        TimestampSupplier.fromPath(Path.of("/var/backup/latest.tar")),
+        Duration.ofHours(24), 3600);
+```
+
+### UpdateActionTask
+
+Performs an action when a source has been updated since the last run.
+On the first run (no previous check recorded), the action is always triggered.
+On subsequent runs, the action is triggered only if the source's timestamp is more recent
+than the last check. When the source has not been updated, the previous `TaskResult` is
+returned unchanged.
+
+```java
+import java.nio.file.Path;
+import com.fathzer.healthtray.CheckTask.Status;
+import com.fathzer.healthtray.CheckTask.TaskResult;
+import com.fathzer.healthtray.tasks.UpdateActionTask;
+import com.fathzer.healthtray.tasks.TimestampSupplier;
+
+new UpdateActionTask("Reload config",
+        TimestampSupplier.fromPath(Path.of("/etc/myapp/config.yml")),
+        () -> {
+            reloadConfig();
+            return new TaskResult(Status.OK, "Config reloaded");
+        },
+        60);
+```
+
+## TimestampSupplier
+
+A functional interface that supplies the last update timestamp of a source.
+Implementations should throw `IOException` when the source is unavailable.
+
+### Built-in suppliers
+
+| Supplier | Description |
+|----------|-------------|
+| `TimestampSupplier.fromPath(Path)` | Returns a file's last modification time. |
+| `DropboxTimestampSupplier` | Returns a Dropbox file's server-side modification time. |
+
+### DropboxTimestampSupplier
+
+A `TimestampSupplier` backed by a file on Dropbox. It uses the Dropbox Java SDK to retrieve
+the file's server-side last modification time.
+
+**This is an optional integration**: the Dropbox SDK (`com.dropbox.core:dropbox-core-sdk`)
+is declared as an optional Maven dependency. Clients who don't use Dropbox don't need to
+add it to their own pom.
+
+```java
+import com.dropbox.core.DbxRequestConfig;
+import com.dropbox.core.v2.DbxClientV2;
+import com.fathzer.healthtray.tasks.DropboxTimestampSupplier;
+
+DbxRequestConfig config = DbxRequestConfig.newBuilder("your-app-name").build();
+DbxClientV2 client = new DbxClientV2(config, accessToken);
+// ...
+new DropboxTimestampSupplier(client, "/backup/latest.tar");
+```
+
+To create a `DbxClientV2`, you need:
+1. Register an application on the [Dropbox App Console](https://www.dropbox.com/developers/apps)
+   to obtain an app key and secret.
+2. Obtain an access token (e.g. generate a scoped token directly from the App Console).
+3. Build the client as shown above.
+
+The access token must have the `files.metadata.read` permission.
 
 ## Creating custom checks
 
@@ -145,12 +227,18 @@ public class StatusFileCheck extends CheckTask {
 
 ### How it works
 
-- **`doRun()`** is called immediately at startup (via `init()`) and then every `periodSeconds`.
-- **`doInit()`** defaults to calling `doRun()`. Override it if the initial check should behave
-  differently from periodic checks.
+- **`doInit()`** is called once at startup. It defaults to returning `OK` (no-op).
+  Override it if the task needs to perform initialization (e.g. connect to a remote service).
+  If `doInit()` throws an exception or returns `ERROR`, the task is marked as failed,
+  displayed in the status window with the error message, and is **not scheduled** for
+  periodic checks.
+- **`doRun()`** is called on the first scheduled run (immediately if no saved state exists,
+  or at a computed delay based on the last check time) and then every `periodSeconds`.
+  If `doRun()` throws an exception, it is caught, logged, and converted to an `ERROR`
+  result — the scheduling continues.
 - The base class tracks `status`, `message`, `lastCheck`, and `lastChange` automatically.
 - `lastChange` is only updated on an actual status transition (not on the first observation).
-- Listeners can subscribe to `onCheckDone` (fired after every check) and `onStateChange`
+- Listeners can subscribe to `onCheckDone` (fired after every run) and `onStateChange`
   (fired only when the status changes). The UI and notification system use these internally.
 
 ## State persistence
@@ -161,10 +249,12 @@ Task state is saved to a properties file on shutdown and restored on the next st
 - **Custom file**: pass a `Path` to `HealthTray.launch(tasks, stateFile)`.
 
 The merge logic on startup is:
-- If `init()` succeeds (OK): all saved fields (status, message, timestamps) are restored.
-- If `init()` fails (ERROR): the error and message from `init()` are kept, `lastCheck` is taken
-  from the saved state, and `lastChange` is taken from the saved state only if the saved status
-  was already `ERROR` (otherwise it's a new error, so `lastChange` is null).
+- The saved state is restored first (status, message, `lastCheck`, `lastChange`).
+- Then `doInit()` is called. If it succeeds (OK), the restored state is kept as-is.
+- If `doInit()` fails (ERROR or exception): the error and message from init are kept,
+  `lastCheck` is preserved from the saved state, and `lastChange` is taken from the saved
+  state only if the saved status was already `ERROR` (otherwise it's a new error, so
+  `lastChange` is null). The task is not scheduled.
 
 ## No-tray mode (GNOME Shell and others)
 
