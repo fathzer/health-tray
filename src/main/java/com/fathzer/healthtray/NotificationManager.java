@@ -4,8 +4,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import com.fathzer.healthtray.tasks.CheckTask;
-
 import dorkbox.notify.Notify;
 import dorkbox.notify.Position;
 import dorkbox.notify.Theme;

@@ -25,8 +25,6 @@ import javax.swing.WindowConstants;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
-import com.fathzer.healthtray.tasks.CheckTask;
-
 /** Window displaying the current state of every {@link CheckTask}.
  * <BR>The window subscribes to each task's {@link CheckTask.Listener#onCheckDone} event to refresh
  * the table in real-time (only while visible). Callers invoke {@link #show()} (on the EDT) to display it.

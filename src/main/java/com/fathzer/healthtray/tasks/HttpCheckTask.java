@@ -9,6 +9,8 @@ import java.time.Duration;
 import java.util.Set;
 import java.util.function.Function;
 
+import com.fathzer.healthtray.CheckTask;
+
 /** A {@link CheckTask} that verifies an HTTP(S) URL returns an accepted status code.
  * <BR>Instances are created via the {@link #builder(String, String, long)} method, which returns a
  * {@link Builder} allowing full configuration of the check:
@@ -103,19 +105,25 @@ public final class HttpCheckTask extends CheckTask {
 			this.periodSeconds = periodSeconds;
 		}
 
-		/** Sets the connect timeout (default: 10 seconds). */
+		/** Sets the connect timeout (default: 10 seconds).
+		 * @param timeout the connect timeout.
+		 * @return this builder for chaining. */
 		public Builder connectTimeout(Duration timeout) {
 			this.clientBuilder.connectTimeout(timeout);
 			return this;
 		}
 
-		/** Sets the request timeout (default: 10 seconds). Use {@code null} for no request timeout. */
+		/** Sets the request timeout (default: 10 seconds). Use {@code null} for no request timeout.
+		 * @param timeout the request timeout, or {@code null} for no timeout.
+		 * @return this builder for chaining. */
 		public Builder requestTimeout(Duration timeout) {
 			this.requestTimeout = timeout;
 			return this;
 		}
 
-		/** Sets the redirect-following policy (default: {@link HttpClient.Redirect#ALWAYS}). */
+		/** Sets the redirect-following policy (default: {@link HttpClient.Redirect#ALWAYS}).
+		 * @param redirect the redirect-following policy.
+		 * @return this builder for chaining. */
 		public Builder redirect(HttpClient.Redirect redirect) {
 			this.clientBuilder.followRedirects(redirect);
 			return this;
@@ -123,7 +131,8 @@ public final class HttpCheckTask extends CheckTask {
 
 		/** Sets the accepted HTTP status codes (default: {@code Set.of(200)}).
 		 * Any code not in this set is reported as ERROR.
-		 */
+		 * @param codes the set of accepted HTTP status codes.
+		 * @return this builder for chaining. */
 		public Builder okCodes(Set<Integer> codes) {
 			this.okCodes = Set.copyOf(codes);
 			return this;
@@ -132,7 +141,8 @@ public final class HttpCheckTask extends CheckTask {
 		/** Sets the verification function called when the status code is accepted.
 		 * <BR>This replaces subclassing: the function receives the {@link HttpResponse} and returns
 		 * the final {@link TaskResult}. The default returns {@code OK} with message {@code "HTTP <code>"}.
-		 */
+		 * @param verify the verification function.
+		 * @return this builder for chaining. */
 		public Builder verify(Function<HttpResponse<Void>, TaskResult> verify) {
 			this.verify = verify;
 			return this;
@@ -140,12 +150,13 @@ public final class HttpCheckTask extends CheckTask {
 
 		/** Exposes the underlying {@link HttpClient.Builder} for advanced configuration
 		 * (proxy, authenticator, SSL context, etc.).
-		 */
+		 * @return the underlying {@link HttpClient.Builder}. */
 		public HttpClient.Builder httpClientBuilder() {
 			return clientBuilder;
 		}
 
-		/** Builds the {@link HttpCheckTask}. */
+		/** Builds the {@link HttpCheckTask}.
+		 * @return a new {@link HttpCheckTask}. */
 		public HttpCheckTask build() {
 			return new HttpCheckTask(name, periodSeconds, URI.create(url), clientBuilder.build(),
 					requestTimeout, okCodes, verify);

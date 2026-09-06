@@ -21,7 +21,8 @@ public interface TimestampSupplier {
 		return () -> Files.getLastModifiedTime(path).toInstant();
 	}
 
-	/** @return the source's last update timestamp.
+	/** Returns the source's last update timestamp.
+	 * @return the source's last update timestamp.
 	 * @throws IOException if the source is unavailable. */
 	Instant get() throws IOException;
 }

@@ -11,8 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-import com.fathzer.healthtray.tasks.CheckTask;
-
 /** Persists the state of {@link CheckTask}s across application restarts.
  * <BR>State is stored in a {@link Properties} file, with one entry per task.
  * Each task's fields (name, status, message, lastCheck, lastChange) are saved and can be restored

@@ -10,8 +10,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
-import com.fathzer.healthtray.tasks.CheckTask.Status;
-import com.fathzer.healthtray.tasks.CheckTask.TaskResult;
+import com.fathzer.healthtray.CheckTask.Status;
+import com.fathzer.healthtray.CheckTask.TaskResult;
 import com.fathzer.healthtray.tasks.TimestampSupplier;
 import com.fathzer.healthtray.tasks.UpdateActionTask;
 

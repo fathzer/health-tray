@@ -1,4 +1,4 @@
-package com.fathzer.healthtray.tasks;
+package com.fathzer.healthtray;
 
 import java.time.Instant;
 import java.util.List;
@@ -19,17 +19,24 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * Subclasses implement {@link #doInit()} and {@link #doRun()} to perform the actual check logic.
  */
 public abstract class CheckTask {
+	/** A predefined {@link TaskResult} with {@link Status#OK} and an empty message. */
 	public static final TaskResult OK = new TaskResult(Status.OK, "");
-	
+
+	/** The result of a check: a status and a message.
+	 * @param type the status of the check.
+	 * @param message a short human-readable message describing the result. */
     public record TaskResult(Status type, String message) {}
 
+	/** The status of a check task. */
     public enum Status {
+		/** The check succeeded. */
         OK,
+		/** The check failed. */
         ERROR
     }
 
     /** Immutable snapshot of a task's state, used for persistence across restarts. */
-    public record SavedState(
+    record SavedState(
             String name,
             Status status,
             String message,
@@ -39,9 +46,13 @@ public abstract class CheckTask {
 
     /** Listener for {@link CheckTask} events. */
     public interface Listener {
-        /** Called after every check (init or run). */
+        /** Called after every check (init or run).
+         * @param task the task that was checked. */
         default void onCheckDone(CheckTask task) {}
-        /** Called when the status changes. {@code oldStatus} is {@code null} on the first observation. */
+        /** Called when the status changes.
+         * @param task the task whose status changed.
+         * @param oldStatus the previous status, or {@code null} on the first observation.
+         * @param newStatus the new status. */
         default void onStateChange(CheckTask task, Status oldStatus, Status newStatus) {}
     }
 
@@ -63,24 +74,39 @@ public abstract class CheckTask {
         this.periodSeconds = periodSeconds;
     }
 
+	/** Gets the task name.
+	 * @return the task name (displayed in notifications and the status window). */
     public final String getName() { return name; }
+	/** Gets the period between two checks.
+	 * @return the period in seconds between two checks. */
     public final long getPeriod() { return periodSeconds; }
+	/** Gets the current status.
+	 * @return the current status, or {@code null} if no check has been run yet. */
     public final Status getStatus() { return status; }
+	/** Gets the message from the last check.
+	 * @return the message from the last check, or {@code null} if no check has been run yet. */
     public final String getMessage() { return message; }
+	/** Gets the timestamp of the last check.
+	 * @return the timestamp of the last check, or {@code null} if no check has been run yet. */
     public final Instant getLastCheck() { return lastCheck; }
+	/** Gets the timestamp of the last status change.
+	 * @return the timestamp of the last status change, or {@code null} if no change has occurred. */
     public final Instant getLastChange() { return lastChange; }
 
-    /** Adds a listener that will be notified of check and state change events. */
+    /** Adds a listener that will be notified of check and state change events.
+     * @param listener the listener to add. */
     public void addListener(Listener listener) {
         listeners.add(listener);
     }
 
-    /** Removes a previously added listener. */
+    /** Removes a previously added listener.
+     * @param listener the listener to remove. */
     public void removeListener(Listener listener) {
         listeners.remove(listener);
     }
 
-    /** Runs the initial check. Subclasses should not override this; implement {@link #doInit()} instead. */
+    /** Runs the initial check. Subclasses should not override this; implement {@link #doInit()} instead.
+     * @return the {@link TaskResult} from {@link #doInit()}. */
     public final TaskResult init() {
         TaskResult result = doInit();
         updateState(result);
@@ -99,7 +125,7 @@ public abstract class CheckTask {
      * @param saved the state saved at the previous shutdown.
      * @return the raw {@link TaskResult} from {@link #doInit()}.
      */
-    public final TaskResult initWithRestore(SavedState saved) {
+    final TaskResult initWithRestore(SavedState saved) {
         TaskResult result = doInit();
         if (result.type() == Status.OK) {
             // Init succeeded: restore all saved values.
@@ -125,23 +151,26 @@ public abstract class CheckTask {
         return result;
     }
 
-    /** Runs a periodic check. Subclasses should not override this; implement {@link #doRun()} instead. */
+    /** Runs a periodic check. Subclasses should not override this; implement {@link #doRun()} instead.
+     * @return the {@link TaskResult} from {@link #doRun()}. */
     public final TaskResult run() {
         TaskResult result = doRun();
         updateState(result);
         return result;
     }
 
-    /** Performs the initial check. Defaults does nothing and returns OK. */
+    /** Performs the initial check. Defaults does nothing and returns OK.
+     * @return the {@link TaskResult} of the initial check. */
     protected TaskResult doInit() {
         return OK;
     }
 
-    /** Performs a periodic check. */
+    /** Performs a periodic check.
+     * @return the {@link TaskResult} of the check. */
     protected abstract TaskResult doRun();
 
     /** Captures the current state as a {@link SavedState} for persistence. */
-    public SavedState captureState() {
+    SavedState captureState() {
         return new SavedState(name, status, message, lastCheck, lastChange);
     }
 

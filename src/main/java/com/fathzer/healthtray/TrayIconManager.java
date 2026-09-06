@@ -12,8 +12,6 @@ import java.util.function.Consumer;
 
 import javax.imageio.ImageIO;
 
-import com.fathzer.healthtray.tasks.CheckTask;
-
 /** Manages an icon that reflects the overall health of all {@link CheckTask}s.
  * <BR>When all tasks are {@link CheckTask.Status#OK OK}, a green-tinted icon is displayed.
  * <BR>When at least one task is in {@link CheckTask.Status#ERROR ERROR}, a red-tinted icon is displayed.
