@@ -19,19 +19,6 @@ final class Dragger {
 	 * @param window the window to make draggable.
 	 */
 	static void attach(Window window) {
-		window.addMouseListener(new MouseAdapter() {
-			private Point dragOrigin = null;
-
-			@Override
-			public void mousePressed(MouseEvent e) {
-				dragOrigin = MouseInfo.getPointerInfo().getLocation();
-			}
-
-			@Override
-			public void mouseReleased(MouseEvent e) {
-				dragOrigin = null;
-			}
-		});
 		window.addMouseMotionListener(new MouseAdapter() {
 			private Point dragOrigin = null;
 			private Point windowOrigin = null;

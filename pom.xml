@@ -35,10 +35,24 @@
       <artifactId>slf4j-simple</artifactId>
       <version>2.0.17</version>
     </dependency>
+    <!-- Optional: only needed by DropboxTimestampSupplier. Clients who don't use Dropbox
+         don't need to add this dependency to their own pom. -->
+    <dependency>
+      <groupId>com.dropbox.core</groupId>
+      <artifactId>dropbox-core-sdk</artifactId>
+      <version>7.1.1</version>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <version>5.14.4</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <version>5.23.0</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
