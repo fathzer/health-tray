@@ -12,10 +12,12 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -348,34 +350,65 @@ public class HealthTray {
 		}
 		final Map<String, CheckTask.SavedState> savedStates = loadedStates;
 		// Run all inits in parallel, then schedule on completion.
-		List<CompletableFuture<Void>> initFutures = tasks.stream()
-				.map(task -> CompletableFuture.runAsync(() -> {
-					CheckTask.SavedState saved = savedStates.get(task.getName());
-					if (saved != null) {
-						task.initWithRestore(saved);
-					} else {
-						task.init();
-					}
-				}))
-				.toList();
-		CompletableFuture.allOf(initFutures.toArray(new CompletableFuture[0]))
-				.thenRun(() -> {
-					// All inits are done: update the icon to reflect the actual state, then schedule.
-					SwingUtilities.invokeLater(() -> {
-						if (iconManager != null) {
-							iconManager.updateFromCurrentState();
-						}
-						scheduler = Executors.newScheduledThreadPool(tasks.size(), r -> {
-							Thread t = new Thread(r, "health-check");
-							t.setDaemon(true);
-							return t;
-						});
-						for (CheckTask task : tasks) {
-							long period = task.getPeriod();
-							scheduler.scheduleAtFixedRate(task::run, period, period, TimeUnit.SECONDS);
-						}
-					});
+		CompletableFuture.allOf(tasks.stream()
+			.map(task -> CompletableFuture.runAsync(() ->
+				// init() restores the saved state first (if any), then calls doInit().
+				// It catches exceptions internally and marks the task as not inited on failure.
+				task.init(Optional.ofNullable(savedStates.get(task.getName())))
+			)).toArray(CompletableFuture[]::new)).thenRun(() ->
+			// All inits are done: update the icon, then schedule.
+			SwingUtilities.invokeLater(() -> {
+				// If all inits failed, keep the grey "initializing" icon.
+				// Otherwise, update to green/red based on the actual task states.
+				if (iconManager != null && tasks.stream().anyMatch(CheckTask::isInited)) {
+					iconManager.updateFromCurrentState();
+				}
+				scheduler = Executors.newScheduledThreadPool(tasks.size(), r -> {
+					Thread t = new Thread(r, "health-check");
+					t.setDaemon(true);
+					return t;
 				});
+				for (CheckTask task : tasks) {
+					// Don't schedule tasks whose init failed.
+					if (!task.isInited()) {
+						continue;
+					}
+					long period = task.getPeriod();
+					long initialDelay = computeInitialDelay(task, period);
+					scheduler.scheduleAtFixedRate(() -> safeRun(task), initialDelay, period, TimeUnit.SECONDS);
+				}
+			})
+		);
+	}
+
+	/** Runs a task safely, catching and logging any exception so that the scheduled execution is not suppressed.
+	 * @param task the task to run.
+	 */
+	private static void safeRun(CheckTask task) {
+		try {
+			task.run();
+		} catch (RuntimeException e) {
+			LOGGER.log(Level.SEVERE, e, () -> "Error during run of task " + task.getName());
+		}
+	}
+
+	/** Computes the initial delay before the first scheduled run of a task.
+	 * <BR>If the task has a saved last check time, the delay is calculated so the next run occurs
+	 * one period after the last check: {@code lastCheck + period - now}, clamped to 0 if negative
+	 * (the task is already overdue and should run immediately).
+	 * <BR>If the task has no saved state (first launch), the delay is 0 so the task runs immediately.
+	 * @param task the task to schedule.
+	 * @param period the task period in seconds.
+	 * @return the initial delay in seconds (0 if the task should run immediately).
+	 */
+	private static long computeInitialDelay(CheckTask task, long period) {
+		Instant lastCheck = task.getLastCheck();
+		if (lastCheck == null) {
+			return 0;
+		}
+		long elapsed = Instant.now().getEpochSecond() - lastCheck.getEpochSecond();
+		long remaining = period - elapsed;
+		return Math.max(0, remaining);
 	}
 
 	/** Shows a one-shot notification (used for the startup message).

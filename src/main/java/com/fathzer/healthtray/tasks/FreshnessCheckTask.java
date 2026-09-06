@@ -37,7 +37,7 @@ public class FreshnessCheckTask extends CheckTask {
 
 	@Override
 	protected TaskResult doRun() {
-		Instant timestamp;
+		final Instant timestamp;
 		try {
 			timestamp = timestampSupplier.get();
 		} catch (IOException e) {

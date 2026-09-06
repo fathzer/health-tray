@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
@@ -13,13 +14,14 @@ import com.fathzer.healthtray.CheckTask.SavedState;
 import com.fathzer.healthtray.CheckTask.Status;
 import com.fathzer.healthtray.CheckTask.TaskResult;
 
-/** Tests the merge logic of {@link CheckTask#initWithRestore(SavedState)}.
- * <BR>Verifies the four scenarios:
+/** Tests the merge logic of {@link CheckTask#init(Optional)}.
+ * <BR>Verifies the scenarios:
  * <ul>
  *   <li>init OK + saved OK  &rarr; restore all saved values</li>
  *   <li>init OK + saved ERROR &rarr; restore saved ERROR state</li>
  *   <li>init ERROR + saved OK  &rarr; keep init error, saved lastCheck, lastChange=null</li>
  *   <li>init ERROR + saved ERROR &rarr; keep init error, saved lastCheck, saved lastChange</li>
+ *   <li>init OK + no saved state &rarr; status remains null, lastCheck remains null</li>
  * </ul>
  */
 class CheckTaskInitRestoreTest {
@@ -60,7 +62,7 @@ class CheckTaskInitRestoreTest {
                 new TaskResult(Status.OK, "init ok"),
                 new TaskResult(Status.OK, "run ok"));
 
-        task.initWithRestore(saved);
+        task.init(Optional.of(saved));
 
         assertEquals(Status.OK, task.getStatus());
         assertEquals("saved ok msg", task.getMessage());
@@ -78,7 +80,7 @@ class CheckTaskInitRestoreTest {
                 new TaskResult(Status.OK, "init ok"),
                 new TaskResult(Status.OK, "run ok"));
 
-        task.initWithRestore(saved);
+        task.init(Optional.of(saved));
 
         // Init succeeded, so we restore the saved ERROR state.
         assertEquals(Status.ERROR, task.getStatus());
@@ -98,7 +100,7 @@ class CheckTaskInitRestoreTest {
                 new TaskResult(Status.ERROR, "init failed"),
                 new TaskResult(Status.OK, "run ok"));
 
-        task.initWithRestore(saved);
+        task.init(Optional.of(saved));
 
         // Init failed: keep ERROR + message from init.
         assertEquals(Status.ERROR, task.getStatus());
@@ -119,7 +121,7 @@ class CheckTaskInitRestoreTest {
                 new TaskResult(Status.ERROR, "init failed again"),
                 new TaskResult(Status.OK, "run ok"));
 
-        task.initWithRestore(saved);
+        task.init(Optional.of(saved));
 
         // Init failed: keep ERROR + message from init.
         assertEquals(Status.ERROR, task.getStatus());
@@ -131,14 +133,95 @@ class CheckTaskInitRestoreTest {
     }
 
     @Test
-    void initWithRestore_firesOnCheckDoneAndOnStateChange() {
+    void initOk_noSavedState_leavesStatusAndLastCheckNull() {
+        FakeTask task = new FakeTask("Test",
+                new TaskResult(Status.OK, "init ok"),
+                new TaskResult(Status.OK, "run ok"));
+
+        task.init(Optional.empty());
+
+        // Init succeeded with no saved state: nothing was set, no check was done.
+        assertNull(task.getStatus());
+        assertNull(task.getLastCheck());
+        assertNull(task.getMessage());
+        assertNull(task.getLastChange());
+        assertTrue(task.isInited(), "Task should be inited after successful init");
+    }
+
+    @Test
+    void initError_notInited() {
+        SavedState saved = saved(Status.OK, "msg", Instant.parse("2026-01-01T10:00:00Z"), null);
+        FakeTask task = new FakeTask("Test",
+                new TaskResult(Status.ERROR, "init failed"),
+                new TaskResult(Status.OK, "run ok"));
+
+        task.init(Optional.of(saved));
+
+        assertFalse(task.isInited(), "Task should not be inited after failed init");
+    }
+
+    @Test
+    void initException_catchesAndMarksAsNotInited() {
+        Instant savedCheck = Instant.parse("2026-01-01T10:00:00Z");
+        SavedState saved = saved(Status.OK, "saved ok msg", savedCheck, null);
+        FakeTask task = new FakeTask("Test",
+                new TaskResult(Status.OK, "should not be used"),
+                new TaskResult(Status.OK, "run ok")) {
+            @Override
+            protected TaskResult doInit() {
+                throw new RuntimeException("Boom");
+            }
+        };
+
+        List<String> events = new ArrayList<>();
+        task.addListener(listener(events));
+
+        task.init(Optional.of(saved));
+
+        // Init threw: task should be in ERROR, not inited, lastCheck preserved from saved state.
+        assertFalse(task.isInited(), "Task should not be inited after init exception");
+        assertEquals(Status.ERROR, task.getStatus());
+        assertTrue(task.getMessage().contains("Boom"), "Expected message to contain 'Boom', got: " + task.getMessage());
+        assertEquals(savedCheck, task.getLastCheck(), "lastCheck should be preserved from saved state");
+        assertTrue(events.contains("stateChange:OK->ERROR"), "Expected onStateChange OK->ERROR, got: " + events);
+    }
+
+    @Test
+    void initOk_firesNoEvent() {
         SavedState saved = saved(Status.OK, "msg", Instant.parse("2026-01-01T10:00:00Z"), null);
         FakeTask task = new FakeTask("Test",
                 new TaskResult(Status.OK, "init ok"),
                 new TaskResult(Status.OK, "run ok"));
 
         List<String> events = new ArrayList<>();
-        task.addListener(new Listener() {
+        task.addListener(listener(events));
+
+        task.init(Optional.of(saved));
+
+        // Init succeeded and restored state is the same as saved: no events should fire.
+        assertTrue(events.isEmpty(), "Expected no events, got: " + events);
+    }
+
+    @Test
+    void initError_firesOnStateChangeOnly() {
+        SavedState saved = saved(Status.OK, "msg", Instant.parse("2026-01-01T10:00:00Z"), null);
+        FakeTask task = new FakeTask("Test",
+                new TaskResult(Status.ERROR, "init failed"),
+                new TaskResult(Status.OK, "run ok"));
+
+        List<String> events = new ArrayList<>();
+        task.addListener(listener(events));
+
+        task.init(Optional.of(saved));
+
+        // Init failed: onStateChange should fire (OK -> ERROR), but not onCheckDone (no check was done).
+        assertTrue(events.contains("stateChange:OK->ERROR"), "Expected onStateChange OK->ERROR, got: " + events);
+        assertFalse(events.stream().anyMatch(e -> e.startsWith("checkDone:")), "Expected no onCheckDone event, got: " + events);
+        assertEquals(1, events.size(), "Expected exactly 1 event, got: " + events);
+    }
+
+    private static Listener listener(List<String> events) {
+        return new Listener() {
             @Override
             public void onCheckDone(CheckTask t) {
                 events.add("checkDone:" + t.getStatus());
@@ -147,14 +230,6 @@ class CheckTaskInitRestoreTest {
             public void onStateChange(CheckTask t, Status oldStatus, Status newStatus) {
                 events.add("stateChange:" + oldStatus + "->" + newStatus);
             }
-        });
-
-        task.initWithRestore(saved);
-
-        // Should fire onCheckDone once and onStateChange once (first observation, oldStatus=null).
-        assertTrue(events.contains("checkDone:OK"), "Expected onCheckDone with OK status");
-        assertTrue(events.contains("stateChange:null->OK"), "Expected onStateChange null->OK");
-        // Each event should fire exactly once.
-        assertEquals(2, events.size(), "Expected exactly 2 events, got: " + events);
+        };
     }
 }

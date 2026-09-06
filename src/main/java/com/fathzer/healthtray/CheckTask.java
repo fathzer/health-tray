@@ -2,7 +2,10 @@ package com.fathzer.healthtray;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /** Abstract base class for a periodic check task.
  * <BR>Each task has a name, a period (in seconds), and maintains its current state:
@@ -13,8 +16,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * </ul>
  * <BR>Listeners can subscribe to two events:
  * <ul>
- *   <li>{@link Listener#onCheckDone} &ndash; fired after every check (init or run)</li>
- *   <li>{@link Listener#onStateChange} &ndash; fired when the status changes (including the first observation)</li>
+ *   <li>{@link Listener#onCheckDone} &ndash; fired after every run</li>
+ *   <li>{@link Listener#onStateChange} &ndash; fired when the status changes</li>
  * </ul>
  * Subclasses implement {@link #doInit()} and {@link #doRun()} to perform the actual check logic.
  */
@@ -46,7 +49,7 @@ public abstract class CheckTask {
 
     /** Listener for {@link CheckTask} events. */
     public interface Listener {
-        /** Called after every check (init or run).
+        /** Called after every run.
          * @param task the task that was checked. */
         default void onCheckDone(CheckTask task) {}
         /** Called when the status changes.
@@ -64,6 +67,7 @@ public abstract class CheckTask {
     private volatile String message;
     private volatile Instant lastCheck;
     private volatile Instant lastChange;
+    private volatile boolean inited;
 
     /** Creates a check task.
      * @param name the task name (displayed in notifications and the status window).
@@ -92,6 +96,11 @@ public abstract class CheckTask {
 	/** Gets the timestamp of the last status change.
 	 * @return the timestamp of the last status change, or {@code null} if no change has occurred. */
     public final Instant getLastChange() { return lastChange; }
+	/** Returns whether this task has been successfully initialized.
+	 * <BR>A task that failed its initialization (exception or ERROR result from {@link #doInit()})
+	 * is not inited and should not be scheduled.
+	 * @return {@code true} if the task was initialized successfully. */
+    public final boolean isInited() { return inited; }
 
     /** Adds a listener that will be notified of check and state change events.
      * @param listener the listener to add. */
@@ -105,56 +114,68 @@ public abstract class CheckTask {
         listeners.remove(listener);
     }
 
-    /** Runs the initial check. Subclasses should not override this; implement {@link #doInit()} instead.
-     * @return the {@link TaskResult} from {@link #doInit()}. */
-    public final TaskResult init() {
-        TaskResult result = doInit();
-        updateState(result);
-        return result;
-    }
-
-    /** Runs the initial check, then merges the result with the saved state.
-     * <BR>Merge logic:
+    /** Initializes the task, optionally restoring a previously saved state.
+     * <BR>If a saved state is provided, it is restored first (so that {@code lastCheck} is available
+     * even if {@link #doInit()} throws an exception). Then {@link #doInit()} is called:
      * <ul>
-     *   <li>If init succeeds (OK): all fields are restored from the saved state
-     *       (status, message, lastCheck, lastChange).</li>
-     *   <li>If init fails (ERROR): the error status and message from init are kept,
-     *       lastCheck is taken from the saved state, and lastChange is taken from the saved state
-     *       only if the saved status was already ERROR (otherwise null, since it's a new error).</li>
+     *   <li>If init succeeds (OK): the restored state (if any) is kept as-is. No events are fired.
+     *       The task is marked as initialized ({@link #isInited()} returns {@code true}).</li>
+     *   <li>If init fails (ERROR or exception): the error status and message are kept,
+     *       lastCheck remains from the saved state (or {@code null} if no saved state),
+     *       and lastChange is taken from the saved state only if the saved status was already ERROR
+     *       (otherwise null, since it's a new error). {@link Listener#onStateChange} is fired.
+     *       The task is not marked as initialized ({@link #isInited()} returns {@code false}).</li>
      * </ul>
-     * @param saved the state saved at the previous shutdown.
-     * @return the raw {@link TaskResult} from {@link #doInit()}.
+     * <BR>Note: init is not a check, so {@code lastCheck} is never set by this method
+     * (it is only preserved from the saved state).
+     * @param saved the saved state from the previous shutdown, or empty if starting fresh.
+     * @return the {@link TaskResult} from {@link #doInit()}, or an ERROR result if {@link #doInit()} threw an exception.
      */
-    final TaskResult initWithRestore(SavedState saved) {
-        TaskResult result = doInit();
-        if (result.type() == Status.OK) {
-            // Init succeeded: restore all saved values.
-            this.message = saved.message();
-            this.lastCheck = saved.lastCheck();
-            this.lastChange = saved.lastChange();
-            this.status = saved.status();
-        } else {
-            // Init failed: keep error + message from init, but use saved lastCheck
-            // and saved lastChange only if the saved state was already ERROR.
+    public final TaskResult init(Optional<SavedState> saved) {
+        // 1. Restore saved state if present.
+        Status oldStatus = null;
+        if (saved.isPresent()) {
+            SavedState s = saved.get();
+            this.message = s.message();
+            this.lastCheck = s.lastCheck();
+            this.lastChange = s.lastChange();
+            this.status = s.status();
+            oldStatus = s.status();
+        }
+        // 2. Run init.
+        TaskResult result;
+        try {
+            result = doInit();
+        } catch (RuntimeException e) {
+            Logger.getLogger(CheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during init of task " + getName());
+            result = new TaskResult(Status.ERROR, "Initialization failed: " + e.getMessage());
+        }
+        if (result.type() != Status.OK) {
+            // Init failed: keep error + message from init, lastCheck is already restored (or null).
             this.message = result.message();
-            this.lastCheck = saved.lastCheck();
-            this.lastChange = saved.status() == Status.ERROR ? saved.lastChange() : null;
+            this.lastChange = (oldStatus == Status.ERROR) ? this.lastChange : null;
             this.status = Status.ERROR;
-        }
-        // Fire events once with the merged state (first observation, oldStatus=null).
-        for (Listener l : listeners) {
-            l.onCheckDone(this);
-        }
-        for (Listener l : listeners) {
-            l.onStateChange(this, null, this.status);
+            // Notify the state change (old status -> ERROR).
+            for (Listener l : listeners) {
+                l.onStateChange(this, oldStatus, Status.ERROR);
+            }
+        } else {
+            // Init succeeded.
+            this.inited = true;
         }
         return result;
     }
 
     /** Runs a periodic check. Subclasses should not override this; implement {@link #doRun()} instead.
-     * @return the {@link TaskResult} from {@link #doRun()}. */
+     * @return the {@link TaskResult} from {@link #doRun()}, or an ERROR result if {@link #doRun()} threw an exception. */
     public final TaskResult run() {
-        TaskResult result = doRun();
+        TaskResult result;
+        try {
+            result = doRun();
+        } catch (RuntimeException e) {
+            Logger.getLogger(CheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during run of task " + getName());
+            result = new TaskResult(Status.ERROR, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
         updateState(result);
         return result;
     }
