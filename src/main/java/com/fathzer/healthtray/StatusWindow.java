@@ -201,7 +201,11 @@ class StatusWindow implements AbstractCheckTask.Listener {
 
 	@Override
 	public void onStateChange(AbstractCheckTask task, AbstractCheckTask.Status oldStatus, AbstractCheckTask.Status newStatus) {
-		// Refresh to update the pause/start button and state display.
+		onActivationChanged(task);
+	}
+
+	@Override
+	public void onActivationChanged(AbstractCheckTask task) {
 		if (frame.isVisible()) {
 			SwingUtilities.invokeLater(this::refresh);
 		}

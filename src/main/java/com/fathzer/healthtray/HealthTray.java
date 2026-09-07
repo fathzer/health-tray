@@ -66,7 +66,7 @@ public class HealthTray {
 	private static List<AbstractCheckTask> tasks;
 	private static StatePersistence persistence;
 	private static Notify startupNotification;
-	private static TrayIconManager iconManager;
+	private static IconManager iconManager;
 	private static final java.util.Map<AbstractCheckTask, java.util.concurrent.ScheduledFuture<?>> scheduledFutures = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private HealthTray() {
@@ -105,34 +105,29 @@ public class HealthTray {
 		}
 
 		persistence = new StatePersistence(stateFile);
+		HealthTray.tasks = originalTasks;
 
-		// Check for duplicate task names.
-		List<String> duplicates = findDuplicateNames(originalTasks);
-		boolean hasDuplicates = !duplicates.isEmpty();
-		if (hasDuplicates) {
-			LOGGER.severe(() -> "Duplicate task names detected: " + duplicates + ". No checks will be loaded.");
-		}
-		final List<AbstractCheckTask> activeTasks = hasDuplicates ? List.of() : originalTasks;
-		HealthTray.tasks = activeTasks;
-
-		notificationManager = new NotificationManager(activeTasks);
-		StatusWindow statusWindow = new StatusWindow(activeTasks, notificationManager::restore, HealthTray::quit);
+		notificationManager = new NotificationManager(originalTasks);
+		StatusWindow statusWindow = new StatusWindow(originalTasks, notificationManager::restore, HealthTray::quit);
 		notificationManager.setOnNotificationClick(statusWindow::showOnEdt);
 
-		BufferedImage heart = TrayIconManager.loadHeart();
-		TrayIcon icon = createTrayIcon(hasDuplicates, noTray, statusWindow, heart);
-		if (icon == null && !noTray) {
+		// 1. Create the IconManager on all tasks. Icon starts grey (no task is initialized yet).
+		//    It subscribes to task events and will update automatically as tasks are initialized, paused, or change status.
+		iconManager = createIconManager(noTray, originalTasks, statusWindow);
+		if (iconManager == null) {
 			return; // Tray icon creation failed
 		}
 
-		// The TrayIconManager (if created) starts with a grey "initializing" icon.
-		// It is created inside showStartupNotification, attached to the tray icon or the notification.
-		if (hasDuplicates) {
-			showDuplicateNotification(duplicates, noTray, statusWindow, heart);
+		// 3. Check for duplicate task names. If duplicates, nothing starts and the icon stays grey.
+		List<String> duplicates = findDuplicateNames(originalTasks);
+		if (!duplicates.isEmpty()) {
+			LOGGER.severe(() -> "Duplicate task names detected: " + duplicates + ". No checks will be loaded.");
+			showDuplicateNotification(duplicates, noTray, statusWindow);
 		} else {
-			TrayIconManager iconManager = showStartupNotification(noTray, activeTasks, statusWindow, icon);
-			// Run init() for all tasks in parallel (off the EDT), then schedule periodic checks.
-			initAndSchedule(activeTasks, iconManager);
+			// 4. Show the startup notification and initialize all tasks (events update the icon).
+			showStartupNotification(noTray, statusWindow);
+			// 5. Init tasks in parallel, then schedule periodic runs.
+			initAndSchedule(originalTasks);
 		}
 		// Ensure state is saved even on unexpected shutdown (Ctrl+C, etc.).
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -162,60 +157,71 @@ public class HealthTray {
 		}
 	}
 
-	/** Creates and registers the system tray icon, wiring up click handlers to open the status window.
-	 * <br>Note: this method does not create a {@link TrayIconManager}; the caller is responsible for
-	 * creating one (so it can later call {@link TrayIconManager#updateFromCurrentState()} after init).
-	 * @param hasDuplicates whether duplicate task names were detected.
-	 * @param noTray if {@code true}, the tray icon is skipped and this method returns {@code null}.
-	 * @param statusWindow the status window to open when the icon is clicked.
-	 * @param heart the base heart image used for the icon.
-	 * @return the created {@link TrayIcon}, or {@code null} if {@code noTray} is {@code true} or the
+	/** Creates the {@link IconManager} attached to the tray icon or the compact notification.
+	 * <BR>In no-tray mode, a compact persistent notification is created and the IconManager updates its image.
+	 * In tray mode, a system tray icon is created (with the IconManager's initial grey icon) and the
+	 * IconManager updates its image.
+	 * @param noTray whether the tray icon is disabled (no-tray mode).
+	 * @param tasks the tasks to monitor.
+	 * @param statusWindow the status window to open when the icon/notification is clicked.
+	 * @return the created {@link IconManager} (starting with a grey icon), or {@code null} if the tray
 	 *         icon could not be added to the system tray.
 	 */
-	private static TrayIcon createTrayIcon(boolean hasDuplicates, boolean noTray,
-			StatusWindow statusWindow, BufferedImage heart) {
+	private static IconManager createIconManager(boolean noTray, List<AbstractCheckTask> tasks, StatusWindow statusWindow) {
 		if (noTray) {
-			return null;
-		}
-		SystemTray tray = SystemTray.getSystemTray();
-		Image initialIcon = hasDuplicates
-				? TrayIconManager.tint(heart, 0x88, 0x88, 0x88)
-				: new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
-		TrayIcon icon = new TrayIcon(initialIcon, hasDuplicates ? "HealthTray - ERROR" : "HealthTray");
-		icon.setImageAutoSize(true);
-		icon.addActionListener(e -> statusWindow.show());
-		icon.addMouseListener(new MouseAdapter() {
-			@Override
-			public void mouseClicked(MouseEvent e) {
-				if ((e.getModifiersEx() & InputEvent.BUTTON1_DOWN_MASK) != 0
-						|| e.getButton() == MouseEvent.BUTTON1) {
-					statusWindow.show();
+			Notify notify = showCompactNotification("Health Tray", statusWindow::showOnEdt);
+			startupNotification = notify;
+			return new IconManager(img -> SwingUtilities.invokeLater(() -> notify.setImage(new ImageIcon(img.getScaledInstance(20, 20, Image.SCALE_SMOOTH)))), tasks);
+		} else {
+			TrayIcon icon = new TrayIcon(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), "HealthTray");
+			icon.setImageAutoSize(true);
+			icon.addActionListener(e -> statusWindow.show());
+			icon.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					if ((e.getModifiersEx() & InputEvent.BUTTON1_DOWN_MASK) != 0
+							|| e.getButton() == MouseEvent.BUTTON1) {
+						statusWindow.show();
+					}
 				}
+			});
+			try {
+				SystemTray.getSystemTray().add(icon);
+			} catch (AWTException e) {
+				LOGGER.log(Level.SEVERE, "Unable to add icon to system tray", e);
+				return null;
 			}
-		});
-		try {
-			tray.add(icon);
-		} catch (AWTException e) {
-			LOGGER.log(Level.SEVERE, "Unable to add icon to system tray", e);
-			return null;
+			// IconManager's constructor immediately sets the grey icon on the tray icon.
+			return new IconManager(img -> SwingUtilities.invokeLater(() -> icon.setImage(img)), tasks);
 		}
-		return icon;
 	}
 
 	/** Shows a notification alerting the user that duplicate task names were detected and no checks were loaded.
-	 * <br>In no-tray mode, a compact persistent notification is used. Otherwise, a standard error
+	 * <br>In no-tray mode, the compact notification's text is updated. Otherwise, a standard error
 	 * notification is displayed. Clicking either notification opens the status window.
 	 * @param duplicates the list of duplicate task names.
 	 * @param noTray whether the tray icon is disabled (no-tray mode).
 	 * @param statusWindow the status window to open when the notification is clicked.
-	 * @param heart the base heart image, tinted grey for the error icon.
 	 */
 	private static void showDuplicateNotification(List<String> duplicates, boolean noTray,
-			StatusWindow statusWindow, BufferedImage heart) {
+			StatusWindow statusWindow) {
 		String message = "Duplicate task names: " + String.join(", ", duplicates) + ". No checks loaded.";
+		// The icon is already grey (no task is active), use it for the notification.
+		Image icon = iconManager.getIcon();
 		if (noTray) {
-			Notify notify = showCompactNotification("Health Tray Off", statusWindow::showOnEdt);
-			notify.setImage(new ImageIcon(TrayIconManager.tint(heart, 0x88, 0x88, 0x88).getScaledInstance(20, 20, Image.SCALE_SMOOTH)));
+			// In no-tray mode, the compact notification is already showing with the grey icon.
+			// Just show an additional error notification.
+			Notify notify = Notify.Companion.create()
+					.title("HealthTray - Configuration error")
+					.text(message)
+					.theme(Theme.Companion.getDefaultDark())
+					.position(Position.BOTTOM_RIGHT)
+					.onClickAction(n -> {
+						statusWindow.showOnEdt();
+						return Unit.INSTANCE;
+					});
+			notify.image(icon);
+			notify.showError();
 		} else {
 			Notify notify = Notify.Companion.create()
 					.title("HealthTray - Configuration error")
@@ -226,31 +232,20 @@ public class HealthTray {
 						statusWindow.showOnEdt();
 						return Unit.INSTANCE;
 					});
-			notify.image(TrayIconManager.tint(heart, 0x88, 0x88, 0x88));
+			notify.image(icon);
 			notify.showError();
 		}
 	}
 
-	/** Shows the startup notification when all tasks are valid and creates a {@link TrayIconManager}.
-	 * <br>In no-tray mode, a compact persistent notification replaces the tray icon and a
-	 * {@link TrayIconManager} is attached to it so its icon changes color with the overall state.
-	 * Otherwise, a short one-shot "Surveillance activée" notification is displayed and the
-	 * {@link TrayIconManager} is attached to the tray icon.
+	/** Shows the startup notification ("Surveillance activée") in tray mode.
+	 * <BR>In no-tray mode, the compact notification is already created by {@link #createIconManager},
+	 * so this method does nothing.
 	 * @param noTray whether the tray icon is disabled (no-tray mode).
-	 * @param activeTasks the tasks to monitor.
 	 * @param statusWindow the status window to open when the notification is clicked.
-	 * @param icon the tray icon (non-null in tray mode, null in no-tray mode).
-	 * @return the created {@link TrayIconManager} (starting with a grey "initializing" icon).
 	 */
-	private static TrayIconManager showStartupNotification(boolean noTray, List<AbstractCheckTask> activeTasks,
-			StatusWindow statusWindow, TrayIcon icon) {
-		if (noTray) {
-			Notify notify = showCompactNotification("Health Tray On", statusWindow::showOnEdt);
-			startupNotification = notify;
-			return new TrayIconManager(img -> notify.setImage(new ImageIcon(img.getScaledInstance(20, 20, Image.SCALE_SMOOTH))), activeTasks);
-		} else {
+	private static void showStartupNotification(boolean noTray, StatusWindow statusWindow) {
+		if (!noTray) {
 			startupNotification = notify("HealthTray", "Surveillance activée", AbstractCheckTask.Status.OK, statusWindow::showOnEdt);
-			return new TrayIconManager(icon, activeTasks);
 		}
 	}
 
@@ -334,16 +329,13 @@ public class HealthTray {
 		return List.copyOf(duplicates);
 	}
 
-	/** Initializes all tasks in parallel (off the EDT), then switches the icon from grey to the
-	 * actual green/red state and starts the periodic scheduling.
+	/** Initializes all tasks in parallel (off the EDT), then starts the periodic scheduling.
 	 * <BR>The init phase runs on a separate thread pool so the EDT is not blocked. Once all inits
-	 * complete, {@link TrayIconManager#updateFromCurrentState()} is called on the EDT to refresh the
-	 * icon, and the periodic scheduler is started.
+	 * complete, the periodic scheduler is started. The icon is updated automatically via
+	 * {@link AbstractCheckTask.Listener#onActivationChanged} events fired by each task's init.
 	 * @param tasks the tasks to initialize and schedule.
-	 * @param iconManager the icon manager to update after init (may be null if no icon is managed).
 	 */
-	private static void initAndSchedule(List<AbstractCheckTask> tasks, TrayIconManager iconMgr) {
-		HealthTray.iconManager = iconMgr;
+	private static void initAndSchedule(List<AbstractCheckTask> tasks) {
 		// Load saved state (if any) before running init.
 		Map<String, AbstractCheckTask.SavedState> loadedStates;
 		try {
@@ -362,12 +354,11 @@ public class HealthTray {
 			t.setDaemon(true);
 			return t;
 		});
-		// All inits are done: create the scheduler, update the icon, then schedule.
+		// All inits are done: schedule the tasks.
 		allInitResults.thenRun(() -> SwingUtilities.invokeLater(() -> {
 			for (AbstractCheckTask task : tasks) {
 				scheduleTask(task);
 			}
-			updateIcon();
 		}));
 	}
 
@@ -385,15 +376,10 @@ public class HealthTray {
 		scheduledFutures.put(task, future);
 	}
 
-	/** Updates the tray icon to reflect the current state of all tasks. */
-	private static void updateIcon() {
-		if (iconManager != null && tasks.stream().anyMatch(AbstractCheckTask::isInited)) {
-			iconManager.updateFromCurrentState();
-		}
-	}
-
 	/** Pauses a task: cancels its scheduled execution and marks it as not inited.
 	 * <BR>The task's state (status, message, lastCheck) is preserved so it can be restored on resume.
+	 * <BR>The {@link AbstractCheckTask.Listener#onActivationChanged} event is fired by {@link AbstractCheckTask#setPaused},
+	 * which automatically updates the icon and status window.
 	 * <BR>This method must be called on the EDT.
 	 * @param task the task to pause.
 	 */
@@ -403,15 +389,13 @@ public class HealthTray {
 		if (future != null) {
 			future.cancel(false);
 		}
-		// Mark as not inited so the icon reflects the paused state.
-		// Note: we don't fire onStateChange because the status itself doesn't change,
-		// only the scheduling state.
-		updateIcon();
 	}
 
 	/** Resumes a task: re-initializes it and schedules it if init succeeds.
 	 * <BR>The initialization runs asynchronously (off the EDT). If it fails, the task
 	 * remains paused and is not scheduled.
+	 * <BR>The {@link AbstractCheckTask.Listener#onActivationChanged} event is fired by {@link AbstractCheckTask#init}
+	 * on success, which automatically updates the icon and status window.
 	 * <BR>This method must be called on the EDT.
 	 * @param task the task to resume.
 	 */
@@ -426,7 +410,6 @@ public class HealthTray {
 				if (task.isInited()) {
 					scheduleTask(task);
 				}
-				updateIcon();
 			});
 		});
 	}

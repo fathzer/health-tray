@@ -6,6 +6,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.swing.SwingUtilities;
+
 /** Abstract base class for a periodic check task.
  * <BR>Each task has a name, a period (in seconds), and maintains its current state:
  * <ul>
@@ -58,6 +60,11 @@ public abstract class AbstractCheckTask {
          * @param oldStatus the previous status, or {@code null} on the first observation.
          * @param newStatus the new status. */
         default void onStateChange(AbstractCheckTask task, Status oldStatus, Status newStatus) {}
+        /** Called when the task's activation state changes (initialized or paused/resumed).
+         * <BR>This is fired when a task becomes initialized (after a successful init),
+         * when it is paused, or when it is resumed (which triggers a re-init).
+         * @param task the task whose activation state changed. */
+        default void onActivationChanged(AbstractCheckTask task) {}
     }
 
     private final String name;
@@ -108,8 +115,16 @@ public abstract class AbstractCheckTask {
 	 * @return {@code true} if the task is paused. */
     public final boolean isPaused() { return paused; }
 	/** Sets the paused state of this task.
+	 * <BR>When pausing, the task is marked as not initialized and {@link Listener#onActivationChanged}
+	 * is fired. When resuming, only the flag is set (the actual re-initialization is handled by the caller).
 	 * @param paused {@code true} to pause the task, {@code false} to resume it. */
-    public final void setPaused(boolean paused) { this.paused = paused; }
+    final void setPaused(boolean paused) {
+        this.paused = paused;
+        if (paused) {
+            this.inited = false;
+            fireActivationChanged();
+        }
+    }
 
     /** Adds a listener that will be notified of check and state change events.
      * @param listener the listener to add. */
@@ -141,6 +156,9 @@ public abstract class AbstractCheckTask {
      * @return the {@link TaskResult} from {@link #doInit()}, or an ERROR result if {@link #doInit()} threw an exception.
      */
     public final TaskResult init(SavedState saved) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            LOGGER.warning("init() called on the EDT for task " + getName() + " — this may block the UI");
+        }
         // 1. Restore saved state if present.
         Status oldStatus = null;
         if (saved != null) {
@@ -179,6 +197,7 @@ public abstract class AbstractCheckTask {
         } else {
             // Init succeeded.
             this.inited = true;
+            fireActivationChanged();
         }
         return result;
     }
@@ -186,6 +205,9 @@ public abstract class AbstractCheckTask {
     /** Runs a periodic check. Subclasses should not override this; implement {@link #doRun()} instead.
      * @return the {@link TaskResult} from {@link #doRun()}, or an ERROR result if {@link #doRun()} threw an exception. */
     public final TaskResult run() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            LOGGER.warning("run() called on the EDT for task " + getName() + " — this may block the UI");
+        }
         LOGGER.info("Running task " + getName());
         TaskResult result;
         try {
@@ -230,6 +252,13 @@ public abstract class AbstractCheckTask {
             for (Listener l : listeners) {
                 l.onStateChange(this, oldStatus, result.type());
             }
+        }
+    }
+
+    /** Notifies listeners that the activation state (inited/paused) has changed. */
+    private void fireActivationChanged() {
+        for (Listener l : listeners) {
+            l.onActivationChanged(this);
         }
     }
 }
