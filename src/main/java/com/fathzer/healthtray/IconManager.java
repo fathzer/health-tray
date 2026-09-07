@@ -90,22 +90,22 @@ class IconManager implements AbstractCheckTask.Listener {
 
 	/** Computes the overall state from all tasks.
 	 * <BR>A task in {@link AbstractCheckTask.Status#ERROR ERROR} is considered an error even if it is
-	 * paused or not initialized — the goal is to not hide an uncorrected error just because the task
+	 * stopped or initializing — the goal is to not hide an uncorrected error just because the task
 	 * is suspended.
-	 * @return 0=grey (no active task), 1=green (at least one active task, no error at all),
-	 *         2=red (at least one task in ERROR, active or not, as long as at least one task is active). */
+	 * @return 0=grey (no running task), 1=green (at least one running task, no error at all),
+	 *         2=red (at least one task in ERROR, running or not, as long as at least one task is running). */
 	private int computeState() {
-		boolean anyActive = false;
+		boolean anyRunning = false;
 		boolean anyError = false;
 		for (AbstractCheckTask task : tasks) {
 			if (task.getStatus() == AbstractCheckTask.Status.ERROR) {
 				anyError = true;
 			}
-			if (task.isInited() && !task.isPaused()) {
-				anyActive = true;
+			if (task.getActivationState() == AbstractCheckTask.ActivationState.RUNNING) {
+				anyRunning = true;
 			}
 		}
-		if (!anyActive) return 0;
+		if (!anyRunning) return 0;
 		return anyError ? 2 : 1;
 	}
 

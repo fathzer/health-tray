@@ -145,7 +145,7 @@ class CheckTaskInitRestoreTest {
         assertNull(task.getLastCheck());
         assertNull(task.getMessage());
         assertNull(task.getLastChange());
-        assertTrue(task.isInited(), "Task should be inited after successful init");
+        assertEquals(AbstractCheckTask.ActivationState.RUNNING, task.getActivationState(), "Task should be RUNNING after successful init");
     }
 
     @Test
@@ -155,9 +155,11 @@ class CheckTaskInitRestoreTest {
                 new TaskResult(Status.ERROR, "init failed"),
                 new TaskResult(Status.OK, "run ok"));
 
-        task.init(saved);
+        try (LogSilencer s = LogSilencer.silence(AbstractCheckTask.class)) {
+            task.init(saved);
+        }
 
-        assertFalse(task.isInited(), "Task should not be inited after failed init");
+        assertEquals(AbstractCheckTask.ActivationState.STOPPED, task.getActivationState(), "Task should be STOPPED after failed init");
     }
 
     @Test
@@ -176,10 +178,12 @@ class CheckTaskInitRestoreTest {
         List<String> events = new ArrayList<>();
         task.addListener(listener(events));
 
-        task.init(saved);
+        try (LogSilencer s = LogSilencer.silence(AbstractCheckTask.class)) {
+            task.init(saved);
+        }
 
         // Init threw: task should be in ERROR, not inited, lastCheck preserved from saved state.
-        assertFalse(task.isInited(), "Task should not be inited after init exception");
+        assertEquals(AbstractCheckTask.ActivationState.STOPPED, task.getActivationState(), "Task should be STOPPED after init exception");
         assertEquals(Status.ERROR, task.getStatus());
         assertTrue(task.getMessage().contains("Boom"), "Expected message to contain 'Boom', got: " + task.getMessage());
         assertEquals(savedCheck, task.getLastCheck(), "lastCheck should be preserved from saved state");

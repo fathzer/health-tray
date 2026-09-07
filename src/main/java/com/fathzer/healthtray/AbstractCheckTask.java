@@ -40,6 +40,22 @@ public abstract class AbstractCheckTask {
         ERROR
     }
 
+	/** The activation state of a task (runtime state, not persisted).
+	 * <BR>This reflects the current lifecycle stage of the task:
+	 * <ul>
+	 *   <li>{@link #STOPPED} &ndash; the task is not running (either paused by the user, or initialization failed).</li>
+	 *   <li>{@link #INITIALIZING} &ndash; the task is currently being initialized.</li>
+	 *   <li>{@link #RUNNING} &ndash; the task is initialized and scheduled for periodic checks.</li>
+	 * </ul> */
+	public enum ActivationState {
+		/** The task is not running (either paused by the user, or initialization failed). */
+		STOPPED,
+		/** The task is currently being initialized. */
+		INITIALIZING,
+		/** The task is initialized and scheduled for periodic checks. */
+		RUNNING
+	}
+
     /** Immutable snapshot of a task's state, used for persistence across restarts. */
     record SavedState(
             String name,
@@ -75,7 +91,7 @@ public abstract class AbstractCheckTask {
     private volatile String message;
     private volatile Instant lastCheck;
     private volatile Instant lastChange;
-    private volatile boolean inited;
+    private volatile ActivationState activationState = ActivationState.STOPPED;
     private volatile boolean paused;
 
     /** Creates a check task.
@@ -105,25 +121,31 @@ public abstract class AbstractCheckTask {
 	/** Gets the timestamp of the last status change.
 	 * @return the timestamp of the last status change, or {@code null} if no change has occurred. */
     public final Instant getLastChange() { return lastChange; }
-	/** Returns whether this task has been successfully initialized.
-	 * <BR>A task that failed its initialization (exception or ERROR result from {@link #doInit()})
-	 * is not inited and should not be scheduled.
-	 * @return {@code true} if the task was initialized successfully. */
-    public final boolean isInited() { return inited; }
-	/** Returns whether this task is paused.
+	/** Returns the current activation state of this task (runtime state, not persisted).
+	 * @return the current {@link ActivationState}. */
+    public final ActivationState getActivationState() { return activationState; }
+	/** Returns whether this task is paused (user intent, persisted across restarts).
 	 * <BR>A paused task is not initialized, not scheduled, and its state is preserved across runs.
 	 * @return {@code true} if the task is paused. */
     public final boolean isPaused() { return paused; }
-	/** Sets the paused state of this task.
-	 * <BR>When pausing, the task is marked as not initialized and {@link Listener#onActivationChanged}
-	 * is fired. When resuming, only the flag is set (the actual re-initialization is handled by the caller).
-	 * @param paused {@code true} to pause the task, {@code false} to resume it. */
-    final void setPaused(boolean paused) {
-        this.paused = paused;
-        if (paused) {
-            this.inited = false;
-            fireActivationChanged();
-        }
+	/** Stops the task: marks it as paused and sets the activation state to {@link ActivationState#STOPPED}.
+	 * <BR>Fires {@link Listener#onActivationChanged}. The caller is responsible for cancelling any
+	 * scheduled execution.
+	 * <BR>This method must be called on the EDT. */
+    final void stop() {
+        this.paused = true;
+        this.activationState = ActivationState.STOPPED;
+        fireActivationChanged();
+    }
+	/** Resumes the task: clears the paused flag and sets the activation state to {@link ActivationState#INITIALIZING}.
+	 * <BR>Fires {@link Listener#onActivationChanged} so that listeners can immediately reflect the
+	 * resume (e.g. switch the button to pause). The actual re-initialization is handled by the caller
+	 * (typically by calling {@link #init(SavedState)} asynchronously).
+	 * <BR>This method must be called on the EDT. */
+    final void resume() {
+        this.paused = false;
+        this.activationState = ActivationState.INITIALIZING;
+        fireActivationChanged();
     }
 
     /** Adds a listener that will be notified of check and state change events.
@@ -142,13 +164,13 @@ public abstract class AbstractCheckTask {
      * <BR>If a saved state is provided, it is restored first (so that {@code lastCheck} is available
      * even if {@link #doInit()} throws an exception). Then {@link #doInit()} is called:
      * <ul>
-     *   <li>If init succeeds (OK): the restored state (if any) is kept as-is. No events are fired.
-     *       The task is marked as initialized ({@link #isInited()} returns {@code true}).</li>
+     *   <li>If init succeeds (OK): the restored state (if any) is kept as-is.
+     *       The activation state is set to {@link ActivationState#RUNNING} and {@link Listener#onActivationChanged} is fired.</li>
      *   <li>If init fails (ERROR or exception): the error status and message are kept,
      *       lastCheck remains from the saved state (or {@code null} if no saved state),
      *       and lastChange is taken from the saved state only if the saved status was already ERROR
      *       (otherwise null, since it's a new error). {@link Listener#onStateChange} is fired.
-     *       The task is not marked as initialized ({@link #isInited()} returns {@code false}).</li>
+     *       The activation state is set to {@link ActivationState#STOPPED} and {@link Listener#onActivationChanged} is fired.</li>
      * </ul>
      * <BR>Note: init is not a check, so {@code lastCheck} is never set by this method
      * (it is only preserved from the saved state).
@@ -169,13 +191,16 @@ public abstract class AbstractCheckTask {
             this.paused = saved.paused();
             oldStatus = saved.status();
         }
-        
+
         if (this.paused) {
         	LOGGER.info("Skipping initialization of paused task " + getName());
+            this.activationState = ActivationState.STOPPED;
         	return new TaskResult(Status.OK, "Task is paused");
         }
-        
+
         LOGGER.info("Initializing task " + getName());
+        this.activationState = ActivationState.INITIALIZING;
+        fireActivationChanged();
 
         // 2. Run init.
         TaskResult result;
@@ -190,13 +215,15 @@ public abstract class AbstractCheckTask {
             this.message = result.message();
             this.lastChange = (oldStatus == Status.ERROR) ? this.lastChange : null;
             this.status = Status.ERROR;
-            // Notify the state change (old status -> ERROR).
+            this.activationState = ActivationState.STOPPED;
+            // Notify the state change (old status -> ERROR) and activation change.
             for (Listener l : listeners) {
                 l.onStateChange(this, oldStatus, Status.ERROR);
             }
+            fireActivationChanged();
         } else {
             // Init succeeded.
-            this.inited = true;
+            this.activationState = ActivationState.RUNNING;
             fireActivationChanged();
         }
         return result;

@@ -90,7 +90,9 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		// Pause column: sort by paused state (running tasks first, paused last).
 		sorter.setComparator(PAUSE_COL, (o1, o2) -> {
 			if (o1 instanceof AbstractCheckTask t1 && o2 instanceof AbstractCheckTask t2) {
-				return Boolean.compare(t1.isPaused() || !t1.isInited(), t2.isPaused() || !t2.isInited());
+				return Boolean.compare(
+						t1.getActivationState() != AbstractCheckTask.ActivationState.RUNNING,
+						t2.getActivationState() != AbstractCheckTask.ActivationState.RUNNING);
 			}
 			return 0;
 		});
@@ -211,6 +213,19 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		}
 	}
 
+	/** Returns true if the task should appear as stopped (paused or failed init).
+	 * <br>A task is considered stopped if its activation state is {@link AbstractCheckTask.ActivationState#STOPPED}.
+	 * @param task the task to check
+	 * @return true if the task should appear as stopped
+	*/
+	private static boolean isStopped(AbstractCheckTask task) {
+		return task != null && task.getActivationState() == AbstractCheckTask.ActivationState.STOPPED;
+	}
+
+	private static Color getLabelColor(JTable table, AbstractCheckTask task) {
+		return isStopped(task) ? PAUSED_COLOR : table.getForeground();
+	}
+
 	/** Renders a text cell with a pale color when the task in that row is paused. */
 	@SuppressWarnings("serial")
 	private static final class PausedAwareCellRenderer extends DefaultTableCellRenderer {
@@ -219,11 +234,7 @@ class StatusWindow implements AbstractCheckTask.Listener {
 				boolean hasFocus, int row, int column) {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			AbstractCheckTask task = getTaskAt(table, row);
-			if (task != null && task.isPaused()) {
-				label.setForeground(PAUSED_COLOR);
-			} else {
-				label.setForeground(table.getForeground());
-			}
+			label.setForeground(getLabelColor(table, task));
 			return label;
 		}
 	}
@@ -238,7 +249,7 @@ class StatusWindow implements AbstractCheckTask.Listener {
 			label.setHorizontalAlignment(SwingConstants.CENTER);
 			AbstractCheckTask task = getTaskAt(table, row);
 			if (value instanceof AbstractCheckTask.Status status) {
-				label.setForeground(task != null && task.isPaused() ? PAUSED_COLOR : switch (status) {
+				label.setForeground(isStopped(task) ? PAUSED_COLOR : switch (status) {
 					case OK -> new Color(0x2E, 0x7D, 0x32);
 					case ERROR -> new Color(0xC6, 0x28, 0x28);
 				});
@@ -259,11 +270,7 @@ class StatusWindow implements AbstractCheckTask.Listener {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			label.setHorizontalAlignment(SwingConstants.CENTER);
 			AbstractCheckTask task = getTaskAt(table, row);
-			if (task != null && task.isPaused()) {
-				label.setForeground(PAUSED_COLOR);
-			} else {
-				label.setForeground(table.getForeground());
-			}
+			label.setForeground(getLabelColor(table, task));
 			if (value instanceof Long period) {
 				label.setText(formatPeriod(period));
 			} else {
@@ -290,11 +297,7 @@ class StatusWindow implements AbstractCheckTask.Listener {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			label.setHorizontalAlignment(SwingConstants.CENTER);
 			AbstractCheckTask task = getTaskAt(table, row);
-			if (task != null && task.isPaused()) {
-				label.setForeground(PAUSED_COLOR);
-			} else {
-				label.setForeground(table.getForeground());
-			}
+			label.setForeground(getLabelColor(table, task));
 			if (value instanceof Instant instant) {
 				LocalDateTime ldt = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
 				LocalDate today = LocalDate.now(ZoneId.systemDefault());
@@ -333,8 +336,8 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
 				boolean hasFocus, int row, int column) {
 			if (value instanceof AbstractCheckTask task) {
-				setText(task.isPaused() || !task.isInited() ? "▶" : "⏸");
-				setToolTipText(task.isPaused() || !task.isInited() ? "Task paused, click to start" : "Task running, click to pause");
+				setText(task.getActivationState() == AbstractCheckTask.ActivationState.RUNNING ? "⏸" : "▶");
+				setToolTipText(task.getActivationState() == AbstractCheckTask.ActivationState.RUNNING ? "Task running, click to pause" : "Task stopped, click to start");
 			} else {
 				setText("");
 			}
@@ -361,14 +364,14 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
 			if (value instanceof AbstractCheckTask task) {
 				currentTask = task;
-				button.setText(task.isPaused() || !task.isInited() ? "▶" : "⏸");
+				button.setText(task.getActivationState() == AbstractCheckTask.ActivationState.RUNNING ? "⏸" : "▶");
 			}
 			return button;
 		}
 
 		private void toggleTask() {
 			if (currentTask == null) return;
-			if (currentTask.isPaused() || !currentTask.isInited()) {
+			if (currentTask.getActivationState() != AbstractCheckTask.ActivationState.RUNNING) {
 				HealthTray.resumeTask(currentTask);
 			} else {
 				HealthTray.pauseTask(currentTask);

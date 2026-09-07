@@ -362,12 +362,12 @@ public class HealthTray {
 		}));
 	}
 
-	/** Schedules a task for periodic execution if it is inited and not paused.
-	 * <BR>Does nothing if the task is not inited or is paused.
+	/** Schedules a task for periodic execution if it is running.
+	 * <BR>Does nothing if the task is not in the RUNNING activation state.
 	 * @param task the task to schedule.
 	 */
 	private static void scheduleTask(AbstractCheckTask task) {
-		if (!task.isInited() || task.isPaused()) {
+		if (task.getActivationState() != AbstractCheckTask.ActivationState.RUNNING) {
 			return;
 		}
 		long period = task.getPeriod();
@@ -376,15 +376,15 @@ public class HealthTray {
 		scheduledFutures.put(task, future);
 	}
 
-	/** Pauses a task: cancels its scheduled execution and marks it as not inited.
+	/** Pauses a task: cancels its scheduled execution and stops it.
 	 * <BR>The task's state (status, message, lastCheck) is preserved so it can be restored on resume.
-	 * <BR>The {@link AbstractCheckTask.Listener#onActivationChanged} event is fired by {@link AbstractCheckTask#setPaused},
+	 * <BR>The {@link AbstractCheckTask.Listener#onActivationChanged} event is fired by {@link AbstractCheckTask#stop()},
 	 * which automatically updates the icon and status window.
 	 * <BR>This method must be called on the EDT.
 	 * @param task the task to pause.
 	 */
 	static void pauseTask(AbstractCheckTask task) {
-		task.setPaused(true);
+		task.stop();
 		ScheduledFuture<?> future = scheduledFutures.remove(task);
 		if (future != null) {
 			future.cancel(false);
@@ -393,21 +393,22 @@ public class HealthTray {
 
 	/** Resumes a task: re-initializes it and schedules it if init succeeds.
 	 * <BR>The initialization runs asynchronously (off the EDT). If it fails, the task
-	 * remains paused and is not scheduled.
-	 * <BR>The {@link AbstractCheckTask.Listener#onActivationChanged} event is fired by {@link AbstractCheckTask#init}
-	 * on success, which automatically updates the icon and status window.
+	 * remains stopped and is not scheduled.
+	 * <BR>The {@link AbstractCheckTask#resume()} method immediately fires {@link AbstractCheckTask.Listener#onActivationChanged}
+	 * so that listeners reflect the INITIALIZING state. On init completion, {@link AbstractCheckTask#init}
+	 * fires another event (RUNNING on success, STOPPED on failure).
 	 * <BR>This method must be called on the EDT.
 	 * @param task the task to resume.
 	 */
 	static void resumeTask(AbstractCheckTask task) {
-		task.setPaused(false);
+		task.resume();
 		// Capture the current state so init() can restore it (preserving lastCheck, etc.).
 		AbstractCheckTask.SavedState currentState = task.captureState();
 		CompletableFuture.runAsync(() -> {
 			// Re-init with the current state (paused=false in the captured state since we just set it).
 			task.init(currentState);
 			SwingUtilities.invokeLater(() -> {
-				if (task.isInited()) {
+				if (task.getActivationState() == AbstractCheckTask.ActivationState.RUNNING) {
 					scheduleTask(task);
 				}
 			});
