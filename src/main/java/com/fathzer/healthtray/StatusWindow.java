@@ -3,11 +3,14 @@ package com.fathzer.healthtray;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Font;
 import java.awt.Frame;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.List;
 
 import javax.swing.BorderFactory;
@@ -25,12 +28,17 @@ import javax.swing.WindowConstants;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
+import com.fathzer.soft.ajlib.swing.table.RowSorter;
+
 /** Window displaying the current state of every {@link CheckTask}.
  * <BR>The window subscribes to each task's {@link CheckTask.Listener#onCheckDone} event to refresh
  * the table in real-time (only while visible). Callers invoke {@link #show()} (on the EDT) to display it.
  */
 class StatusWindow implements CheckTask.Listener {
 	private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
+	private static final DateTimeFormatter DATETIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+	/** Sample date string used to compute the column width for date columns (worst case). */
+	private static final String DATE_SAMPLE = "2099-12-31 23:59:59";
 	private static final String[] COLUMNS = { "Name", "State", "Message", "Period", "Last check", "Last change" };
 
 	private final List<CheckTask> tasks;
@@ -57,6 +65,16 @@ class StatusWindow implements CheckTask.Listener {
 		table.getColumnModel().getColumn(3).setCellRenderer(new PeriodCellRenderer());
 		table.getColumnModel().getColumn(4).setCellRenderer(new TimeCellRenderer());
 		table.getColumnModel().getColumn(5).setCellRenderer(new TimeCellRenderer());
+		fixColumnWidths(table);
+		// Enable sorting by clicking on column headers (ASCENDING -> DESCENDING -> UNSORTED cycle).
+		RowSorter<DefaultTableModel> sorter = new RowSorter<>(model);
+		sorter.setComparator(0, Comparator.comparing(String::toString)); // Name
+		sorter.setComparator(1, Comparator.comparing(o -> o == null ? "" : o.toString())); // State
+		sorter.setComparator(2, Comparator.comparing(o -> o == null ? "" : o.toString())); // Message
+		sorter.setComparator(3, Comparator.comparing(o -> (Long) o)); // Period
+		sorter.setComparator(4, Comparator.nullsLast(Comparator.naturalOrder())); // Last check (Instant)
+		sorter.setComparator(5, Comparator.nullsLast(Comparator.naturalOrder())); // Last change (Instant)
+		table.setRowSorter(sorter);
 
 		JButton restoreButton = new JButton("Restore alerts");
 		restoreButton.addActionListener(e -> restoreAction.run());
@@ -83,6 +101,31 @@ class StatusWindow implements CheckTask.Listener {
 		for (CheckTask task : tasks) {
 			task.addListener(this);
 		}
+	}
+
+	/** Fixes the width of the State, Period, Last check and Last change columns to fit their content.
+	 * <BR>The date columns are sized to fit the worst-case date string (see {@link #DATE_SAMPLE}),
+	 * so the width is stable whether or not dates are currently displayed. */
+	private static void fixColumnWidths(JTable table) {
+		Font font = table.getFont();
+		java.awt.FontMetrics fm = table.getFontMetrics(font);
+		// State column: fit "ERROR" (the longest status) plus padding.
+		int stateWidth = fm.stringWidth("ERROR") + 20;
+		setFixedWidth(table, 1, stateWidth);
+		// Period column: fit the longest period string we might produce (e.g. "999d").
+		int periodWidth = fm.stringWidth("999d") + 20;
+		setFixedWidth(table, 3, periodWidth);
+		// Last check and Last change columns: fit the worst-case date string.
+		int dateWidth = fm.stringWidth(DATE_SAMPLE) + 20;
+		setFixedWidth(table, 4, dateWidth);
+		setFixedWidth(table, 5, dateWidth);
+	}
+
+	/** Sets a column to a fixed width (min = max = preferred). */
+	private static void setFixedWidth(JTable table, int column, int width) {
+		table.getColumnModel().getColumn(column).setMinWidth(width);
+		table.getColumnModel().getColumn(column).setMaxWidth(width);
+		table.getColumnModel().getColumn(column).setPreferredWidth(width);
 	}
 
 	/** Refreshes the table from the tasks and makes the window visible. Must be called on the EDT. */
@@ -153,20 +196,15 @@ class StatusWindow implements CheckTask.Listener {
 		}
 
 		private static String formatPeriod(long seconds) {
-			long days = seconds / 86_400;
-			long hours = (seconds % 86_400) / 3_600;
-			long minutes = (seconds % 3_600) / 60;
-			long secs = seconds % 60;
-			StringBuilder sb = new StringBuilder();
-			if (days > 0) sb.append(days).append("d ");
-			if (hours > 0 || days > 0) sb.append(hours).append("h ");
-			if (minutes > 0 || hours > 0 || days > 0) sb.append(minutes).append("m ");
-			sb.append(secs).append("s");
-			return sb.toString().strip();
+			if (seconds >= 86_400) return (seconds / 86_400) + "d";
+			if (seconds >= 3_600) return (seconds / 3_600) + "h";
+			if (seconds >= 60) return (seconds / 60) + "mn";
+			return seconds + "s";
 		}
 	}
 
-	/** Renders an {@link Instant} as {@code HH:mm:ss} in the local time zone. */
+	/** Renders an {@link Instant} as {@code HH:mm:ss} in the local time zone, or
+	 * {@code yyyy-MM-dd HH:mm:ss} when the date differs from today. */
 	private static final class TimeCellRenderer extends DefaultTableCellRenderer {
 		@Override
 		public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
@@ -174,7 +212,13 @@ class StatusWindow implements CheckTask.Listener {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			label.setHorizontalAlignment(SwingConstants.CENTER);
 			if (value instanceof Instant instant) {
-				label.setText(LocalDateTime.ofInstant(instant, ZoneId.systemDefault()).toLocalTime().format(TIME_FORMAT));
+				LocalDateTime ldt = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
+				LocalDate today = LocalDate.now(ZoneId.systemDefault());
+				if (ldt.toLocalDate().equals(today)) {
+					label.setText(ldt.toLocalTime().format(TIME_FORMAT));
+				} else {
+					label.setText(ldt.format(DATETIME_FORMAT));
+				}
 			} else {
 				label.setText("-");
 			}

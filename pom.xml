@@ -30,6 +30,11 @@
       <artifactId>Notify</artifactId>
       <version>4.5</version>
     </dependency>
+    <dependency>
+      <groupId>com.fathzer</groupId>
+      <artifactId>ajlib</artifactId>
+      <version>0.3.18</version>
+    </dependency>
     <!-- Optional: only needed by DropboxTimestampSupplier. Clients who don't use Dropbox
          don't need to add this dependency to their own pom. -->
     <dependency>
