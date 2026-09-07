@@ -44,6 +44,8 @@ class StatusWindow implements AbstractCheckTask.Listener {
 	private static final DateTimeFormatter DATETIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 	/** Sample date string used to compute the column width for date columns (worst case). */
 	private static final String DATE_SAMPLE = "2099-12-31 23:59:59";
+	/** Pale color used for labels of paused tasks. */
+	private static final Color PAUSED_COLOR = new Color(0x99, 0x99, 0x99);
 	private static final String[] COLUMNS = { "", "Name", "State", "Message", "Period", "Last check", "Last change" };
 	private static final int PAUSE_COL = 0;
 	private static final int NAME_COL = 1;
@@ -76,13 +78,22 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		// Pause/start button column.
 		table.getColumnModel().getColumn(PAUSE_COL).setCellRenderer(new PauseButtonRenderer());
 		table.getColumnModel().getColumn(PAUSE_COL).setCellEditor(new PauseButtonEditor());
+		table.getColumnModel().getColumn(NAME_COL).setCellRenderer(new PausedAwareCellRenderer());
 		table.getColumnModel().getColumn(STATE_COL).setCellRenderer(new StatusCellRenderer());
+		table.getColumnModel().getColumn(MESSAGE_COL).setCellRenderer(new PausedAwareCellRenderer());
 		table.getColumnModel().getColumn(PERIOD_COL).setCellRenderer(new PeriodCellRenderer());
 		table.getColumnModel().getColumn(LAST_CHECK_COL).setCellRenderer(new TimeCellRenderer());
 		table.getColumnModel().getColumn(LAST_CHANGE_COL).setCellRenderer(new TimeCellRenderer());
 		fixColumnWidths(table);
 		// Enable sorting by clicking on column headers (ASCENDING -> DESCENDING -> UNSORTED cycle).
 		RowSorter<DefaultTableModel> sorter = new RowSorter<>(model);
+		// Pause column: sort by paused state (running tasks first, paused last).
+		sorter.setComparator(PAUSE_COL, (o1, o2) -> {
+			if (o1 instanceof AbstractCheckTask t1 && o2 instanceof AbstractCheckTask t2) {
+				return Boolean.compare(t1.isPaused() || !t1.isInited(), t2.isPaused() || !t2.isInited());
+			}
+			return 0;
+		});
 		sorter.setComparator(NAME_COL, Comparator.comparing(String::toString));
 		sorter.setComparator(STATE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
 		sorter.setComparator(MESSAGE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
@@ -170,6 +181,16 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		}
 	}
 
+	/** Gets the task associated with a view row.
+	 * @param table the table.
+	 * @param viewRow the view row index.
+	 * @return the task at that row, or {@code null} if not available. */
+	private static AbstractCheckTask getTaskAt(JTable table, int viewRow) {
+		int modelRow = table.convertRowIndexToModel(viewRow);
+		Object value = table.getModel().getValueAt(modelRow, PAUSE_COL);
+		return value instanceof AbstractCheckTask task ? task : null;
+	}
+
 	@Override
 	public void onCheckDone(AbstractCheckTask task) {
 		// Only refresh if the window is currently visible, to avoid unnecessary EDT work.
@@ -186,6 +207,23 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		}
 	}
 
+	/** Renders a text cell with a pale color when the task in that row is paused. */
+	@SuppressWarnings("serial")
+	private static final class PausedAwareCellRenderer extends DefaultTableCellRenderer {
+		@Override
+		public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+				boolean hasFocus, int row, int column) {
+			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+			AbstractCheckTask task = getTaskAt(table, row);
+			if (task != null && task.isPaused()) {
+				label.setForeground(PAUSED_COLOR);
+			} else {
+				label.setForeground(table.getForeground());
+			}
+			return label;
+		}
+	}
+
 	/** Renders a {@link AbstractCheckTask.Status} as colored text. */
 	@SuppressWarnings("serial")
 	private static final class StatusCellRenderer extends DefaultTableCellRenderer {
@@ -194,8 +232,9 @@ class StatusWindow implements AbstractCheckTask.Listener {
 				boolean hasFocus, int row, int column) {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			label.setHorizontalAlignment(SwingConstants.CENTER);
+			AbstractCheckTask task = getTaskAt(table, row);
 			if (value instanceof AbstractCheckTask.Status status) {
-				label.setForeground(switch (status) {
+				label.setForeground(task != null && task.isPaused() ? PAUSED_COLOR : switch (status) {
 					case OK -> new Color(0x2E, 0x7D, 0x32);
 					case ERROR -> new Color(0xC6, 0x28, 0x28);
 				});
@@ -215,6 +254,12 @@ class StatusWindow implements AbstractCheckTask.Listener {
 				boolean hasFocus, int row, int column) {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			label.setHorizontalAlignment(SwingConstants.CENTER);
+			AbstractCheckTask task = getTaskAt(table, row);
+			if (task != null && task.isPaused()) {
+				label.setForeground(PAUSED_COLOR);
+			} else {
+				label.setForeground(table.getForeground());
+			}
 			if (value instanceof Long period) {
 				label.setText(formatPeriod(period));
 			} else {
@@ -240,6 +285,12 @@ class StatusWindow implements AbstractCheckTask.Listener {
 				boolean hasFocus, int row, int column) {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			label.setHorizontalAlignment(SwingConstants.CENTER);
+			AbstractCheckTask task = getTaskAt(table, row);
+			if (task != null && task.isPaused()) {
+				label.setForeground(PAUSED_COLOR);
+			} else {
+				label.setForeground(table.getForeground());
+			}
 			if (value instanceof Instant instant) {
 				LocalDateTime ldt = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
 				LocalDate today = LocalDate.now(ZoneId.systemDefault());
@@ -279,7 +330,7 @@ class StatusWindow implements AbstractCheckTask.Listener {
 				boolean hasFocus, int row, int column) {
 			if (value instanceof AbstractCheckTask task) {
 				setText(task.isPaused() || !task.isInited() ? "▶" : "⏸");
-				setToolTipText(task.isPaused() || !task.isInited() ? "Start" : "Pause");
+				setToolTipText(task.isPaused() || !task.isInited() ? "Task paused, click to start" : "Task running, click to pause");
 			} else {
 				setText("");
 			}

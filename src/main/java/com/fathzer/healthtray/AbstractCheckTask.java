@@ -21,7 +21,8 @@ import java.util.logging.Logger;
  * Subclasses implement {@link #doInit()} and {@link #doRun()} to perform the actual check logic.
  */
 public abstract class AbstractCheckTask {
-	/** A predefined {@link TaskResult} with {@link Status#OK} and an empty message. */
+	private static final Logger LOGGER = Logger.getLogger(AbstractCheckTask.class.getName());
+    /** A predefined {@link TaskResult} with {@link Status#OK} and an empty message. */
 	public static final TaskResult OK = new TaskResult(Status.OK, "");
 
 	/** The result of a check: a status and a message.
@@ -150,16 +151,20 @@ public abstract class AbstractCheckTask {
             this.paused = saved.paused();
             oldStatus = saved.status();
         }
-        // If the task is paused, we can't initialize it.
+        
         if (this.paused) {
-            throw new IllegalStateException("Task " + getName() + " is paused, cannot initialize it");
+        	LOGGER.info("Skipping initialization of paused task " + getName());
+        	return new TaskResult(Status.OK, "Task is paused");
         }
+        
+        LOGGER.info("Initializing task " + getName());
+
         // 2. Run init.
         TaskResult result;
         try {
             result = doInit();
         } catch (RuntimeException e) {
-            Logger.getLogger(AbstractCheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during init of task " + getName());
+            LOGGER.log(Level.WARNING, e, () -> "Error during init of task " + getName());
             result = new TaskResult(Status.ERROR, "Initialization failed: " + e.getMessage());
         }
         if (result.type() != Status.OK) {
@@ -181,11 +186,12 @@ public abstract class AbstractCheckTask {
     /** Runs a periodic check. Subclasses should not override this; implement {@link #doRun()} instead.
      * @return the {@link TaskResult} from {@link #doRun()}, or an ERROR result if {@link #doRun()} threw an exception. */
     public final TaskResult run() {
+        LOGGER.info("Running task " + getName());
         TaskResult result;
         try {
             result = doRun();
         } catch (RuntimeException e) {
-            Logger.getLogger(AbstractCheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during run of task " + getName());
+            LOGGER.log(Level.WARNING, e, () -> "Error during run of task " + getName());
             result = new TaskResult(Status.ERROR, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
         updateState(result);
