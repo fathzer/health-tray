@@ -2,7 +2,6 @@ package com.fathzer.healthtray;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -21,7 +20,7 @@ import java.util.logging.Logger;
  * </ul>
  * Subclasses implement {@link #doInit()} and {@link #doRun()} to perform the actual check logic.
  */
-public abstract class CheckTask {
+public abstract class AbstractCheckTask {
 	/** A predefined {@link TaskResult} with {@link Status#OK} and an empty message. */
 	public static final TaskResult OK = new TaskResult(Status.OK, "");
 
@@ -44,19 +43,20 @@ public abstract class CheckTask {
             Status status,
             String message,
             Instant lastCheck,
-            Instant lastChange
+            Instant lastChange,
+            boolean paused
     ) {}
 
-    /** Listener for {@link CheckTask} events. */
+    /** Listener for {@link AbstractCheckTask} events. */
     public interface Listener {
         /** Called after every run.
          * @param task the task that was checked. */
-        default void onCheckDone(CheckTask task) {}
+        default void onCheckDone(AbstractCheckTask task) {}
         /** Called when the status changes.
          * @param task the task whose status changed.
          * @param oldStatus the previous status, or {@code null} on the first observation.
          * @param newStatus the new status. */
-        default void onStateChange(CheckTask task, Status oldStatus, Status newStatus) {}
+        default void onStateChange(AbstractCheckTask task, Status oldStatus, Status newStatus) {}
     }
 
     private final String name;
@@ -68,12 +68,13 @@ public abstract class CheckTask {
     private volatile Instant lastCheck;
     private volatile Instant lastChange;
     private volatile boolean inited;
+    private volatile boolean paused;
 
     /** Creates a check task.
      * @param name the task name (displayed in notifications and the status window).
      * @param periodSeconds the period in seconds between two checks.
      */
-    protected CheckTask(String name, long periodSeconds) {
+    protected AbstractCheckTask(String name, long periodSeconds) {
         this.name = name;
         this.periodSeconds = periodSeconds;
     }
@@ -101,6 +102,13 @@ public abstract class CheckTask {
 	 * is not inited and should not be scheduled.
 	 * @return {@code true} if the task was initialized successfully. */
     public final boolean isInited() { return inited; }
+	/** Returns whether this task is paused.
+	 * <BR>A paused task is not initialized, not scheduled, and its state is preserved across runs.
+	 * @return {@code true} if the task is paused. */
+    public final boolean isPaused() { return paused; }
+	/** Sets the paused state of this task.
+	 * @param paused {@code true} to pause the task, {@code false} to resume it. */
+    public final void setPaused(boolean paused) { this.paused = paused; }
 
     /** Adds a listener that will be notified of check and state change events.
      * @param listener the listener to add. */
@@ -128,26 +136,30 @@ public abstract class CheckTask {
      * </ul>
      * <BR>Note: init is not a check, so {@code lastCheck} is never set by this method
      * (it is only preserved from the saved state).
-     * @param saved the saved state from the previous shutdown, or empty if starting fresh.
+     * @param saved the saved state from the previous shutdown, or null if starting fresh.
      * @return the {@link TaskResult} from {@link #doInit()}, or an ERROR result if {@link #doInit()} threw an exception.
      */
-    public final TaskResult init(Optional<SavedState> saved) {
+    public final TaskResult init(SavedState saved) {
         // 1. Restore saved state if present.
         Status oldStatus = null;
-        if (saved.isPresent()) {
-            SavedState s = saved.get();
-            this.message = s.message();
-            this.lastCheck = s.lastCheck();
-            this.lastChange = s.lastChange();
-            this.status = s.status();
-            oldStatus = s.status();
+        if (saved != null) {
+            this.message = saved.message();
+            this.lastCheck = saved.lastCheck();
+            this.lastChange = saved.lastChange();
+            this.status = saved.status();
+            this.paused = saved.paused();
+            oldStatus = saved.status();
+        }
+        // If the task is paused, we can't initialize it.
+        if (this.paused) {
+            throw new IllegalStateException("Task " + getName() + " is paused, cannot initialize it");
         }
         // 2. Run init.
         TaskResult result;
         try {
             result = doInit();
         } catch (RuntimeException e) {
-            Logger.getLogger(CheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during init of task " + getName());
+            Logger.getLogger(AbstractCheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during init of task " + getName());
             result = new TaskResult(Status.ERROR, "Initialization failed: " + e.getMessage());
         }
         if (result.type() != Status.OK) {
@@ -173,7 +185,7 @@ public abstract class CheckTask {
         try {
             result = doRun();
         } catch (RuntimeException e) {
-            Logger.getLogger(CheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during run of task " + getName());
+            Logger.getLogger(AbstractCheckTask.class.getName()).log(Level.WARNING, e, () -> "Error during run of task " + getName());
             result = new TaskResult(Status.ERROR, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
         updateState(result);
@@ -192,7 +204,7 @@ public abstract class CheckTask {
 
     /** Captures the current state as a {@link SavedState} for persistence. */
     SavedState captureState() {
-        return new SavedState(name, status, message, lastCheck, lastChange);
+        return new SavedState(name, status, message, lastCheck, lastChange, paused);
     }
 
     private void updateState(TaskResult result) {

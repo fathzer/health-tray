@@ -3,9 +3,9 @@ package com.fathzer.healthtray.tasks;
 import java.io.IOException;
 import java.time.Instant;
 
-import com.fathzer.healthtray.CheckTask;
+import com.fathzer.healthtray.AbstractCheckTask;
 
-/** A {@link CheckTask} that performs an action when a source has been updated since the last run.
+/** A {@link AbstractCheckTask} that performs an action when a source has been updated since the last run.
  * <BR>The source is represented by a {@link TimestampSupplier}. On each run, the task compares the
  * source's timestamp with the timestamp of the previous run (available via {@link #getLastCheck()}).
  * If the source's timestamp is more recent, the {@link Action} is triggered.
@@ -27,7 +27,7 @@ import com.fathzer.healthtray.CheckTask;
  *         60);
  * }</pre>
  */
-public class UpdateActionTask extends CheckTask {
+public class UpdateActionTask extends AbstractCheckTask {
 	/** Functional interface representing the action to perform when the source is updated.
 	 * <BR>Implementations return a {@link TaskResult} describing the outcome of the action.
 	 * They may throw {@link IOException} to signal an unexpected failure.

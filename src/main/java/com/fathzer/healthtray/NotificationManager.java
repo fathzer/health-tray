@@ -9,18 +9,18 @@ import dorkbox.notify.Position;
 import dorkbox.notify.Theme;
 import kotlin.Unit;
 
-/** Manages the lifecycle of error/recovery notifications for {@link CheckTask}s.
- * <BR>Subscribes to each task's {@link CheckTask.Listener#onStateChange} event:
+/** Manages the lifecycle of error/recovery notifications for {@link AbstractCheckTask}s.
+ * <BR>Subscribes to each task's {@link AbstractCheckTask.Listener#onStateChange} event:
  * <ul>
- *   <li>Transition to {@link CheckTask.Status#ERROR}: shows a persistent notification (until recovery or manual close).</li>
- *   <li>Transition from ERROR to {@link CheckTask.Status#OK}: closes the error notification and shows a short "{@code <name> is ok}" notification.</li>
+ *   <li>Transition to {@link AbstractCheckTask.Status#ERROR}: shows a persistent notification (until recovery or manual close).</li>
+ *   <li>Transition from ERROR to {@link AbstractCheckTask.Status#OK}: closes the error notification and shows a short "{@code <name> is ok}" notification.</li>
  * </ul>
  */
-class NotificationManager implements CheckTask.Listener {
+class NotificationManager implements AbstractCheckTask.Listener {
 	/** Duration (in ms) of the "recovered" notification shown when a task transitions back to OK. */
 	private static final int RECOVERY_DURATION_MS = 10_000;
 
-	private final List<CheckTask> tasks;
+	private final List<AbstractCheckTask> tasks;
 	private volatile Runnable onNotificationClick = () -> {};
 	private final Map<String, Notify> activeErrors = new ConcurrentHashMap<>();
 
@@ -29,9 +29,9 @@ class NotificationManager implements CheckTask.Listener {
 	 * (useful when the click handler depends on another component that depends on this manager).
 	 * @param tasks the tasks to monitor for state changes.
 	 */
-	public NotificationManager(List<CheckTask> tasks) {
+	public NotificationManager(List<AbstractCheckTask> tasks) {
 		this.tasks = tasks;
-		for (CheckTask task : tasks) {
+		for (AbstractCheckTask task : tasks) {
 			task.addListener(this);
 		}
 	}
@@ -42,9 +42,9 @@ class NotificationManager implements CheckTask.Listener {
 	}
 
 	@Override
-	public void onStateChange(CheckTask task, CheckTask.Status oldStatus, CheckTask.Status newStatus) {
-		boolean wasError = oldStatus == CheckTask.Status.ERROR;
-		boolean isError = newStatus == CheckTask.Status.ERROR;
+	public void onStateChange(AbstractCheckTask task, AbstractCheckTask.Status oldStatus, AbstractCheckTask.Status newStatus) {
+		boolean wasError = oldStatus == AbstractCheckTask.Status.ERROR;
+		boolean isError = newStatus == AbstractCheckTask.Status.ERROR;
 		if (isError && !wasError) {
 			showError(task.getName(), task.getMessage());
 		} else if (!isError && wasError) {
@@ -94,13 +94,13 @@ class NotificationManager implements CheckTask.Listener {
 		notify.showInformation();
 	}
 
-	/** Re-shows error notifications for all tasks currently in {@link CheckTask.Status#ERROR}.
+	/** Re-shows error notifications for all tasks currently in {@link AbstractCheckTask.Status#ERROR}.
 	 * <BR>This is useful when the user has manually closed a notification and wants to see it again.
 	 * Tasks whose error notification is still visible are not duplicated.
 	 */
 	public void restore() {
-		for (CheckTask task : tasks) {
-			if (task.getStatus() == CheckTask.Status.ERROR && !activeErrors.containsKey(task.getName())) {
+		for (AbstractCheckTask task : tasks) {
+			if (task.getStatus() == AbstractCheckTask.Status.ERROR && !activeErrors.containsKey(task.getName())) {
 				showError(task.getName(), task.getMessage());
 			}
 		}

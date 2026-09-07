@@ -1,3 +1,3 @@
-/** Provides {@link com.fathzer.healthtray.CheckTask} implementations.
+/** Provides {@link com.fathzer.healthtray.AbstractCheckTask} implementations.
  */
 package com.fathzer.healthtray.tasks;

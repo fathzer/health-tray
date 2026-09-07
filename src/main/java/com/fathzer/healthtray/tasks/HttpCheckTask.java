@@ -9,9 +9,9 @@ import java.time.Duration;
 import java.util.Set;
 import java.util.function.Function;
 
-import com.fathzer.healthtray.CheckTask;
+import com.fathzer.healthtray.AbstractCheckTask;
 
-/** A {@link CheckTask} that verifies an HTTP(S) URL returns an accepted status code.
+/** A {@link AbstractCheckTask} that verifies an HTTP(S) URL returns an accepted status code.
  * <BR>Instances are created via the {@link #builder(String, String, long)} method, which returns a
  * {@link Builder} allowing full configuration of the check:
  * <ul>
@@ -29,7 +29,7 @@ import com.fathzer.healthtray.CheckTask;
  *     .build();
  * }</pre>
  */
-public final class HttpCheckTask extends CheckTask {
+public final class HttpCheckTask extends AbstractCheckTask {
 	private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
 	private static final Set<Integer> DEFAULT_OK_CODES = Set.of(200);
 	private static final Function<HttpResponse<Void>, TaskResult> DEFAULT_VERIFY =

@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -35,7 +36,7 @@ import dorkbox.notify.Position;
 import dorkbox.notify.Theme;
 import kotlin.Unit;
 
-/** A reusable system-tray application that monitors the health of {@link CheckTask}s.
+/** A reusable system-tray application that monitors the health of {@link AbstractCheckTask}s.
  * <BR>Displays a small heart icon in the system tray. Clicking the icon (or a notification) opens
  * a window showing the current state of every task.
  * <BR>On desktop environments where the system tray is not available or buggy (notably GNOME Shell,
@@ -44,9 +45,9 @@ import kotlin.Unit;
  * {@code XDG_CURRENT_DESKTOP} environment variable. In that case, the startup notification becomes
  * persistent (no auto-close, no close button) and can be dragged — it becomes the primary way to
  * interact with the application. Clicking it opens the status window, which has a "Quit" button.
- * <BR>On startup, a notification is shown, then each task's {@link CheckTask#init() init()} runs
- * immediately and {@link CheckTask#run() run()} is executed every {@link CheckTask#getPeriod() period}
- * seconds. When a task transitions to {@link CheckTask.Status#ERROR}, a persistent notification is
+ * <BR>On startup, a notification is shown, then each task's {@link AbstractCheckTask#init() init()} runs
+ * immediately and {@link AbstractCheckTask#run() run()} is executed every {@link AbstractCheckTask#getPeriod() period}
+ * seconds. When a task transitions to {@link AbstractCheckTask.Status#ERROR}, a persistent notification is
  * shown (until recovery or manual close). When it recovers, a short "{@code <name> is ok}"
  * notification is displayed.
  * <BR>Task state (status, message, timestamps) is persisted to a file on shutdown and restored on
@@ -62,9 +63,11 @@ public class HealthTray {
 
 	private static ScheduledExecutorService scheduler;
 	private static NotificationManager notificationManager;
-	private static List<CheckTask> tasks;
+	private static List<AbstractCheckTask> tasks;
 	private static StatePersistence persistence;
 	private static Notify startupNotification;
+	private static TrayIconManager iconManager;
+	private static final java.util.Map<AbstractCheckTask, java.util.concurrent.ScheduledFuture<?>> scheduledFutures = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private HealthTray() {
 		// To prevent instantiation
@@ -77,7 +80,7 @@ public class HealthTray {
 	 * is called (e.g. via the "Quit" button).
 	 * @param taskList the tasks to monitor.
 	 */
-	public static void launch(List<CheckTask> taskList) {
+	public static void launch(List<AbstractCheckTask> taskList) {
 		launch(taskList, DEFAULT_STATE_FILE);
 	}
 
@@ -85,11 +88,11 @@ public class HealthTray {
 	 * @param taskList the tasks to monitor.
 	 * @param stateFile the file used to persist/restore task state across restarts.
 	 */
-	public static void launch(List<CheckTask> taskList, Path stateFile) {
+	public static void launch(List<AbstractCheckTask> taskList, Path stateFile) {
 		SwingUtilities.invokeLater(() -> start(taskList, stateFile));
 	}
 
-	private static void start(List<CheckTask> originalTasks, Path stateFile) {
+	private static void start(List<AbstractCheckTask> originalTasks, Path stateFile) {
 		setupLookAndFeel();
 		if (!SystemTray.isSupported()) {
 			LOGGER.severe("System tray is not supported on this platform");
@@ -109,7 +112,7 @@ public class HealthTray {
 		if (hasDuplicates) {
 			LOGGER.severe(() -> "Duplicate task names detected: " + duplicates + ". No checks will be loaded.");
 		}
-		final List<CheckTask> activeTasks = hasDuplicates ? List.of() : originalTasks;
+		final List<AbstractCheckTask> activeTasks = hasDuplicates ? List.of() : originalTasks;
 		HealthTray.tasks = activeTasks;
 
 		notificationManager = new NotificationManager(activeTasks);
@@ -239,14 +242,14 @@ public class HealthTray {
 	 * @param icon the tray icon (non-null in tray mode, null in no-tray mode).
 	 * @return the created {@link TrayIconManager} (starting with a grey "initializing" icon).
 	 */
-	private static TrayIconManager showStartupNotification(boolean noTray, List<CheckTask> activeTasks,
+	private static TrayIconManager showStartupNotification(boolean noTray, List<AbstractCheckTask> activeTasks,
 			StatusWindow statusWindow, TrayIcon icon) {
 		if (noTray) {
 			Notify notify = showCompactNotification("Health Tray On", statusWindow::showOnEdt);
 			startupNotification = notify;
 			return new TrayIconManager(img -> notify.setImage(new ImageIcon(img.getScaledInstance(20, 20, Image.SCALE_SMOOTH))), activeTasks);
 		} else {
-			startupNotification = notify("HealthTray", "Surveillance activée", CheckTask.Status.OK, statusWindow::showOnEdt);
+			startupNotification = notify("HealthTray", "Surveillance activée", AbstractCheckTask.Status.OK, statusWindow::showOnEdt);
 			return new TrayIconManager(icon, activeTasks);
 		}
 	}
@@ -320,10 +323,10 @@ public class HealthTray {
 	}
 
 	/** @return the list of task names that appear more than once, or an empty list if all names are unique. */
-	private static List<String> findDuplicateNames(List<CheckTask> tasks) {
+	private static List<String> findDuplicateNames(List<AbstractCheckTask> tasks) {
 		Set<String> seen = new HashSet<>();
 		Set<String> duplicates = new HashSet<>();
-		for (CheckTask task : tasks) {
+		for (AbstractCheckTask task : tasks) {
 			if (!seen.add(task.getName())) {
 				duplicates.add(task.getName());
 			}
@@ -339,52 +342,99 @@ public class HealthTray {
 	 * @param tasks the tasks to initialize and schedule.
 	 * @param iconManager the icon manager to update after init (may be null if no icon is managed).
 	 */
-	private static void initAndSchedule(List<CheckTask> tasks, TrayIconManager iconManager) {
+	private static void initAndSchedule(List<AbstractCheckTask> tasks, TrayIconManager iconMgr) {
+		HealthTray.iconManager = iconMgr;
 		// Load saved state (if any) before running init.
-		Map<String, CheckTask.SavedState> loadedStates;
+		Map<String, AbstractCheckTask.SavedState> loadedStates;
 		try {
 			loadedStates = persistence.load();
 		} catch (IOException e) {
 			LOGGER.log(Level.WARNING, "Unable to load saved state, starting fresh", e);
 			loadedStates = new HashMap<>();
 		}
-		final Map<String, CheckTask.SavedState> savedStates = loadedStates;
-		// Run all inits in parallel, then schedule on completion.
-		CompletableFuture.allOf(tasks.stream()
-			.map(task -> CompletableFuture.runAsync(() ->
-				// init() restores the saved state first (if any), then calls doInit().
-				// It catches exceptions internally and marks the task as not inited on failure.
-				task.init(Optional.ofNullable(savedStates.get(task.getName())))
-			)).toArray(CompletableFuture[]::new)).thenRun(() ->
-			// All inits are done: update the icon, then schedule.
+		final Map<String, AbstractCheckTask.SavedState> savedStates = loadedStates;
+		// Run all inits in parallel (paused tasks are skipped by init()), then schedule on completion.
+		CompletableFuture<Void> allInitResults = CompletableFuture.allOf(tasks.stream()
+			.map(task -> CompletableFuture.runAsync(() -> task.init(savedStates.get(task.getName()))))
+			.toArray(CompletableFuture[]::new));
+		scheduler = Executors.newScheduledThreadPool(tasks.size(), r -> {
+			Thread t = new Thread(r, "health-check");
+			t.setDaemon(true);
+			return t;
+		});
+		// All inits are done: create the scheduler, update the icon, then schedule.
+		allInitResults.thenRun(() -> SwingUtilities.invokeLater(() -> {
+			for (AbstractCheckTask task : tasks) {
+				scheduleTask(task);
+			}
+			updateIcon();
+		}));
+	}
+
+	/** Schedules a task for periodic execution if it is inited and not paused.
+	 * <BR>Does nothing if the task is not inited or is paused.
+	 * @param task the task to schedule.
+	 */
+	private static void scheduleTask(AbstractCheckTask task) {
+		if (!task.isInited() || task.isPaused()) {
+			return;
+		}
+		long period = task.getPeriod();
+		long initialDelay = computeInitialDelay(task, period);
+		ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> safeRun(task), initialDelay, period, TimeUnit.SECONDS);
+		scheduledFutures.put(task, future);
+	}
+
+	/** Updates the tray icon to reflect the current state of all tasks. */
+	private static void updateIcon() {
+		if (iconManager != null && tasks.stream().anyMatch(AbstractCheckTask::isInited)) {
+			iconManager.updateFromCurrentState();
+		}
+	}
+
+	/** Pauses a task: cancels its scheduled execution and marks it as not inited.
+	 * <BR>The task's state (status, message, lastCheck) is preserved so it can be restored on resume.
+	 * <BR>This method must be called on the EDT.
+	 * @param task the task to pause.
+	 */
+	static void pauseTask(AbstractCheckTask task) {
+		task.setPaused(true);
+		ScheduledFuture<?> future = scheduledFutures.remove(task);
+		if (future != null) {
+			future.cancel(false);
+		}
+		// Mark as not inited so the icon reflects the paused state.
+		// Note: we don't fire onStateChange because the status itself doesn't change,
+		// only the scheduling state.
+		updateIcon();
+	}
+
+	/** Resumes a task: re-initializes it and schedules it if init succeeds.
+	 * <BR>The initialization runs asynchronously (off the EDT). If it fails, the task
+	 * remains paused and is not scheduled.
+	 * <BR>This method must be called on the EDT.
+	 * @param task the task to resume.
+	 */
+	static void resumeTask(AbstractCheckTask task) {
+		task.setPaused(false);
+		// Capture the current state so init() can restore it (preserving lastCheck, etc.).
+		AbstractCheckTask.SavedState currentState = task.captureState();
+		CompletableFuture.runAsync(() -> {
+			// Re-init with the current state (paused=false in the captured state since we just set it).
+			task.init(currentState);
 			SwingUtilities.invokeLater(() -> {
-				// If all inits failed, keep the grey "initializing" icon.
-				// Otherwise, update to green/red based on the actual task states.
-				if (iconManager != null && tasks.stream().anyMatch(CheckTask::isInited)) {
-					iconManager.updateFromCurrentState();
+				if (task.isInited()) {
+					scheduleTask(task);
 				}
-				scheduler = Executors.newScheduledThreadPool(tasks.size(), r -> {
-					Thread t = new Thread(r, "health-check");
-					t.setDaemon(true);
-					return t;
-				});
-				for (CheckTask task : tasks) {
-					// Don't schedule tasks whose init failed.
-					if (!task.isInited()) {
-						continue;
-					}
-					long period = task.getPeriod();
-					long initialDelay = computeInitialDelay(task, period);
-					scheduler.scheduleAtFixedRate(() -> safeRun(task), initialDelay, period, TimeUnit.SECONDS);
-				}
-			})
-		);
+				updateIcon();
+			});
+		});
 	}
 
 	/** Runs a task safely, catching and logging any exception so that the scheduled execution is not suppressed.
 	 * @param task the task to run.
 	 */
-	private static void safeRun(CheckTask task) {
+	private static void safeRun(AbstractCheckTask task) {
 		try {
 			task.run();
 		} catch (RuntimeException e) {
@@ -401,7 +451,7 @@ public class HealthTray {
 	 * @param period the task period in seconds.
 	 * @return the initial delay in seconds (0 if the task should run immediately).
 	 */
-	private static long computeInitialDelay(CheckTask task, long period) {
+	private static long computeInitialDelay(AbstractCheckTask task, long period) {
 		Instant lastCheck = task.getLastCheck();
 		if (lastCheck == null) {
 			return 0;
@@ -413,7 +463,7 @@ public class HealthTray {
 
 	/** Shows a one-shot notification (used for the startup message).
 	 * @return the created {@link Notify} instance, so callers can close it on quit. */
-	private static Notify notify(String title, String message, CheckTask.Status status, Runnable onClick) {
+	private static Notify notify(String title, String message, AbstractCheckTask.Status status, Runnable onClick) {
 		Notify notify = Notify.Companion.create()
 				.title(title)
 				.text(message)
@@ -424,7 +474,7 @@ public class HealthTray {
 					onClick.run();
 					return Unit.INSTANCE;
 				});
-		if (status == CheckTask.Status.ERROR) {
+		if (status == AbstractCheckTask.Status.ERROR) {
 			notify.showError();
 		} else {
 			notify.showInformation();

@@ -12,18 +12,18 @@ import java.util.function.Consumer;
 
 import javax.imageio.ImageIO;
 
-/** Manages an icon that reflects the overall health of all {@link CheckTask}s.
- * <BR>When all tasks are {@link CheckTask.Status#OK OK}, a green-tinted icon is displayed.
- * <BR>When at least one task is in {@link CheckTask.Status#ERROR ERROR}, a red-tinted icon is displayed.
+/** Manages an icon that reflects the overall health of all {@link AbstractCheckTask}s.
+ * <BR>When all tasks are {@link AbstractCheckTask.Status#OK OK}, a green-tinted icon is displayed.
+ * <BR>When at least one task is in {@link AbstractCheckTask.Status#ERROR ERROR}, a red-tinted icon is displayed.
  * <BR>The icon is swapped only when the overall state actually changes.
  * <BR>This can be used to update a {@link TrayIcon} (in tray mode) or any other icon display
  * (e.g. a dorkbox Notify notification in no-tray mode) via a {@link Consumer<Image>}.
  */
-class TrayIconManager implements CheckTask.Listener {
+class TrayIconManager implements AbstractCheckTask.Listener {
 	private static final String HEART_RESOURCE = "/com/fathzer/healthtray/heart.png";
 
 	private final Consumer<Image> iconSetter;
-	private final List<CheckTask> tasks;
+	private final List<AbstractCheckTask> tasks;
 	private final Image okIcon;
 	private final Image errorIcon;
 	private final Image greyIcon;
@@ -33,7 +33,7 @@ class TrayIconManager implements CheckTask.Listener {
 	 * @param trayIcon the system tray icon to update.
 	 * @param tasks the tasks to monitor for state changes.
 	 */
-	public TrayIconManager(TrayIcon trayIcon, List<CheckTask> tasks) {
+	public TrayIconManager(TrayIcon trayIcon, List<AbstractCheckTask> tasks) {
 		this(trayIcon::setImage, tasks);
 	}
 
@@ -41,7 +41,7 @@ class TrayIconManager implements CheckTask.Listener {
 	 * @param iconSetter called with the new icon image whenever the overall state changes.
 	 * @param tasks the tasks to monitor for state changes.
 	 */
-	public TrayIconManager(Consumer<Image> iconSetter, List<CheckTask> tasks) {
+	public TrayIconManager(Consumer<Image> iconSetter, List<AbstractCheckTask> tasks) {
 		this.iconSetter = iconSetter;
 		this.tasks = tasks;
 		BufferedImage heart = loadHeart();
@@ -50,20 +50,20 @@ class TrayIconManager implements CheckTask.Listener {
 		this.greyIcon = tint(heart, 0x88, 0x88, 0x88);
 		// Set the initial icon to grey (initializing state).
 		iconSetter.accept(greyIcon);
-		for (CheckTask task : tasks) {
+		for (AbstractCheckTask task : tasks) {
 			task.addListener(this);
 		}
 	}
 
 	@Override
-	public void onStateChange(CheckTask task, CheckTask.Status oldStatus, CheckTask.Status newStatus) {
+	public void onStateChange(AbstractCheckTask task, AbstractCheckTask.Status oldStatus, AbstractCheckTask.Status newStatus) {
 		refreshIcon();
 	}
 
 	/** Recomputes the overall state from all tasks and updates the icon if it changed. */
 	private void refreshIcon() {
 		boolean wasError = anyError;
-		anyError = tasks.stream().anyMatch(t -> t.getStatus() == CheckTask.Status.ERROR);
+		anyError = tasks.stream().anyMatch(t -> t.getStatus() == AbstractCheckTask.Status.ERROR);
 		if (anyError != wasError) {
 			iconSetter.accept(anyError ? errorIcon : okIcon);
 		}
@@ -74,7 +74,7 @@ class TrayIconManager implements CheckTask.Listener {
 	 * "initializing" icon to the actual green/red state.
 	 */
 	public void updateFromCurrentState() {
-		anyError = tasks.stream().anyMatch(t -> t.getStatus() == CheckTask.Status.ERROR);
+		anyError = tasks.stream().anyMatch(t -> t.getStatus() == AbstractCheckTask.Status.ERROR);
 		iconSetter.accept(anyError ? errorIcon : okIcon);
 	}
 

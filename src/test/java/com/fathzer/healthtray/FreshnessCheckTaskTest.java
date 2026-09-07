@@ -8,8 +8,8 @@ import java.time.Instant;
 
 import org.junit.jupiter.api.Test;
 
-import com.fathzer.healthtray.CheckTask.Status;
-import com.fathzer.healthtray.CheckTask.TaskResult;
+import com.fathzer.healthtray.AbstractCheckTask.Status;
+import com.fathzer.healthtray.AbstractCheckTask.TaskResult;
 import com.fathzer.healthtray.tasks.FreshnessCheckTask;
 import com.fathzer.healthtray.tasks.TimestampSupplier;
 

@@ -4,9 +4,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 
-import com.fathzer.healthtray.CheckTask;
+import com.fathzer.healthtray.AbstractCheckTask;
 
-/** A {@link CheckTask} that verifies a source has been updated more recently than a maximum age.
+/** A {@link AbstractCheckTask} that verifies a source has been updated more recently than a maximum age.
  * <BR>The source is represented by a {@link TimestampSupplier} that returns the source's last
  * update timestamp. If the source is unavailable, the supplier throws {@link IOException}.
  * <BR>The task reports {@link Status#OK OK} when the source's timestamp is within the allowed
@@ -19,7 +19,7 @@ import com.fathzer.healthtray.CheckTask;
  *         Duration.ofHours(24), 3600);
  * }</pre>
  */
-public class FreshnessCheckTask extends CheckTask {
+public class FreshnessCheckTask extends AbstractCheckTask {
 	private final TimestampSupplier timestampSupplier;
 	private final Duration maxAge;
 

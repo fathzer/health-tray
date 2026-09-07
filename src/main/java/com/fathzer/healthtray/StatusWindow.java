@@ -5,12 +5,14 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
 import java.awt.Frame;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
+import java.util.EventObject;
 import java.util.List;
 
 import javax.swing.BorderFactory;
@@ -25,23 +27,33 @@ import javax.swing.JTable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
+import javax.swing.AbstractCellEditor;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableCellEditor;
+import javax.swing.table.TableCellRenderer;
 
 import com.fathzer.soft.ajlib.swing.table.RowSorter;
 
-/** Window displaying the current state of every {@link CheckTask}.
- * <BR>The window subscribes to each task's {@link CheckTask.Listener#onCheckDone} event to refresh
+/** Window displaying the current state of every {@link AbstractCheckTask}.
+ * <BR>The window subscribes to each task's {@link AbstractCheckTask.Listener#onCheckDone} event to refresh
  * the table in real-time (only while visible). Callers invoke {@link #show()} (on the EDT) to display it.
  */
-class StatusWindow implements CheckTask.Listener {
+class StatusWindow implements AbstractCheckTask.Listener {
 	private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
 	private static final DateTimeFormatter DATETIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 	/** Sample date string used to compute the column width for date columns (worst case). */
 	private static final String DATE_SAMPLE = "2099-12-31 23:59:59";
-	private static final String[] COLUMNS = { "Name", "State", "Message", "Period", "Last check", "Last change" };
+	private static final String[] COLUMNS = { "", "Name", "State", "Message", "Period", "Last check", "Last change" };
+	private static final int PAUSE_COL = 0;
+	private static final int NAME_COL = 1;
+	private static final int STATE_COL = 2;
+	private static final int MESSAGE_COL = 3;
+	private static final int PERIOD_COL = 4;
+	private static final int LAST_CHECK_COL = 5;
+	private static final int LAST_CHANGE_COL = 6;
 
-	private final List<CheckTask> tasks;
+	private final List<AbstractCheckTask> tasks;
 	private final JFrame frame;
 	private final DefaultTableModel model;
 
@@ -51,29 +63,32 @@ class StatusWindow implements CheckTask.Listener {
 	 * @param restoreAction action invoked when the user clicks the "Restore" button.
 	 * @param quitAction action invoked when the user clicks the "Quit" button.
 	 */
-	public StatusWindow(List<CheckTask> tasks, Runnable restoreAction, Runnable quitAction) {
+	public StatusWindow(List<AbstractCheckTask> tasks, Runnable restoreAction, Runnable quitAction) {
 		this.tasks = tasks;
 		this.model = new DefaultTableModel(COLUMNS, 0) {
 			@Override
 			public boolean isCellEditable(int row, int column) {
-				return false;
+				return column == PAUSE_COL;
 			}
 		};
 		JTable table = new JTable(model);
 		table.setRowHeight(22);
-		table.getColumnModel().getColumn(1).setCellRenderer(new StatusCellRenderer());
-		table.getColumnModel().getColumn(3).setCellRenderer(new PeriodCellRenderer());
-		table.getColumnModel().getColumn(4).setCellRenderer(new TimeCellRenderer());
-		table.getColumnModel().getColumn(5).setCellRenderer(new TimeCellRenderer());
+		// Pause/start button column.
+		table.getColumnModel().getColumn(PAUSE_COL).setCellRenderer(new PauseButtonRenderer());
+		table.getColumnModel().getColumn(PAUSE_COL).setCellEditor(new PauseButtonEditor());
+		table.getColumnModel().getColumn(STATE_COL).setCellRenderer(new StatusCellRenderer());
+		table.getColumnModel().getColumn(PERIOD_COL).setCellRenderer(new PeriodCellRenderer());
+		table.getColumnModel().getColumn(LAST_CHECK_COL).setCellRenderer(new TimeCellRenderer());
+		table.getColumnModel().getColumn(LAST_CHANGE_COL).setCellRenderer(new TimeCellRenderer());
 		fixColumnWidths(table);
 		// Enable sorting by clicking on column headers (ASCENDING -> DESCENDING -> UNSORTED cycle).
 		RowSorter<DefaultTableModel> sorter = new RowSorter<>(model);
-		sorter.setComparator(0, Comparator.comparing(String::toString)); // Name
-		sorter.setComparator(1, Comparator.comparing(o -> o == null ? "" : o.toString())); // State
-		sorter.setComparator(2, Comparator.comparing(o -> o == null ? "" : o.toString())); // Message
-		sorter.setComparator(3, Comparator.comparing(o -> (Long) o)); // Period
-		sorter.setComparator(4, Comparator.nullsLast(Comparator.naturalOrder())); // Last check (Instant)
-		sorter.setComparator(5, Comparator.nullsLast(Comparator.naturalOrder())); // Last change (Instant)
+		sorter.setComparator(NAME_COL, Comparator.comparing(String::toString));
+		sorter.setComparator(STATE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
+		sorter.setComparator(MESSAGE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
+		sorter.setComparator(PERIOD_COL, Comparator.comparing(o -> (Long) o));
+		sorter.setComparator(LAST_CHECK_COL, Comparator.nullsLast(Comparator.naturalOrder()));
+		sorter.setComparator(LAST_CHANGE_COL, Comparator.nullsLast(Comparator.naturalOrder()));
 		table.setRowSorter(sorter);
 
 		JButton restoreButton = new JButton("Restore alerts");
@@ -98,7 +113,7 @@ class StatusWindow implements CheckTask.Listener {
 		frame.setSize(820, 240);
 		frame.setLocationRelativeTo(null);
 
-		for (CheckTask task : tasks) {
+		for (AbstractCheckTask task : tasks) {
 			task.addListener(this);
 		}
 	}
@@ -109,16 +124,18 @@ class StatusWindow implements CheckTask.Listener {
 	private static void fixColumnWidths(JTable table) {
 		Font font = table.getFont();
 		java.awt.FontMetrics fm = table.getFontMetrics(font);
+		// Pause column: fixed small width for the button.
+		setFixedWidth(table, PAUSE_COL, 40);
 		// State column: fit "ERROR" (the longest status) plus padding.
 		int stateWidth = fm.stringWidth("ERROR") + 20;
-		setFixedWidth(table, 1, stateWidth);
+		setFixedWidth(table, STATE_COL, stateWidth);
 		// Period column: fit the longest period string we might produce (e.g. "999d").
 		int periodWidth = fm.stringWidth("999d") + 20;
-		setFixedWidth(table, 3, periodWidth);
+		setFixedWidth(table, PERIOD_COL, periodWidth);
 		// Last check and Last change columns: fit the worst-case date string.
 		int dateWidth = fm.stringWidth(DATE_SAMPLE) + 20;
-		setFixedWidth(table, 4, dateWidth);
-		setFixedWidth(table, 5, dateWidth);
+		setFixedWidth(table, LAST_CHECK_COL, dateWidth);
+		setFixedWidth(table, LAST_CHANGE_COL, dateWidth);
 	}
 
 	/** Sets a column to a fixed width (min = max = preferred). */
@@ -140,8 +157,9 @@ class StatusWindow implements CheckTask.Listener {
 	/** Re-reads the tasks state and rebuilds the table rows. */
 	private void refresh() {
 		model.setRowCount(0);
-		for (CheckTask task : tasks) {
+		for (AbstractCheckTask task : tasks) {
 			model.addRow(new Object[] {
+					task,
 					task.getName(),
 					task.getStatus(),
 					task.getMessage() == null ? "" : task.getMessage(),
@@ -153,21 +171,30 @@ class StatusWindow implements CheckTask.Listener {
 	}
 
 	@Override
-	public void onCheckDone(CheckTask task) {
+	public void onCheckDone(AbstractCheckTask task) {
 		// Only refresh if the window is currently visible, to avoid unnecessary EDT work.
 		if (frame.isVisible()) {
 			SwingUtilities.invokeLater(this::refresh);
 		}
 	}
 
-	/** Renders a {@link CheckTask.Status} as colored text. */
+	@Override
+	public void onStateChange(AbstractCheckTask task, AbstractCheckTask.Status oldStatus, AbstractCheckTask.Status newStatus) {
+		// Refresh to update the pause/start button and state display.
+		if (frame.isVisible()) {
+			SwingUtilities.invokeLater(this::refresh);
+		}
+	}
+
+	/** Renders a {@link AbstractCheckTask.Status} as colored text. */
+	@SuppressWarnings("serial")
 	private static final class StatusCellRenderer extends DefaultTableCellRenderer {
 		@Override
 		public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
 				boolean hasFocus, int row, int column) {
 			JLabel label = (JLabel) super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 			label.setHorizontalAlignment(SwingConstants.CENTER);
-			if (value instanceof CheckTask.Status status) {
+			if (value instanceof AbstractCheckTask.Status status) {
 				label.setForeground(switch (status) {
 					case OK -> new Color(0x2E, 0x7D, 0x32);
 					case ERROR -> new Color(0xC6, 0x28, 0x28);
@@ -181,6 +208,7 @@ class StatusWindow implements CheckTask.Listener {
 	}
 
 	/** Renders a period in seconds as {@code Xd Xh Xm Xs} (only non-zero parts are shown). */
+	@SuppressWarnings("serial")
 	private static final class PeriodCellRenderer extends DefaultTableCellRenderer {
 		@Override
 		public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
@@ -205,6 +233,7 @@ class StatusWindow implements CheckTask.Listener {
 
 	/** Renders an {@link Instant} as {@code HH:mm:ss} in the local time zone, or
 	 * {@code yyyy-MM-dd HH:mm:ss} when the date differs from today. */
+	@SuppressWarnings("serial")
 	private static final class TimeCellRenderer extends DefaultTableCellRenderer {
 		@Override
 		public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
@@ -232,6 +261,91 @@ class StatusWindow implements CheckTask.Listener {
 			show();
 		} else {
 			SwingUtilities.invokeLater(this::show);
+		}
+	}
+
+	/** Renders the pause/start button in the first column. */
+	@SuppressWarnings("serial")
+	private static final class PauseButtonRenderer extends JButton implements TableCellRenderer {
+		public PauseButtonRenderer() {
+			setHorizontalAlignment(SwingConstants.CENTER);
+			setBorderPainted(false);
+			setContentAreaFilled(false);
+			setFocusable(false);
+		}
+
+		@Override
+		public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+				boolean hasFocus, int row, int column) {
+			if (value instanceof AbstractCheckTask task) {
+				setText(task.isPaused() || !task.isInited() ? "▶" : "⏸");
+				setToolTipText(task.isPaused() || !task.isInited() ? "Start" : "Pause");
+			} else {
+				setText("");
+			}
+			return this;
+		}
+	}
+
+	/** Editor for the pause/start button. Toggles the task's paused state and notifies {@link HealthTray}. */
+	@SuppressWarnings({"serial","java:S1948"})
+	private final class PauseButtonEditor extends AbstractCellEditor implements TableCellEditor {
+		private final JButton button;
+		private AbstractCheckTask currentTask;
+
+		public PauseButtonEditor() {
+			this.button = new JButton();
+			button.setHorizontalAlignment(SwingConstants.CENTER);
+			button.setBorderPainted(false);
+			button.setContentAreaFilled(false);
+			button.setFocusable(false);
+			button.addActionListener(e -> toggleTask());
+		}
+
+		@Override
+		public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
+			if (value instanceof AbstractCheckTask task) {
+				currentTask = task;
+				button.setText(task.isPaused() || !task.isInited() ? "▶" : "⏸");
+			}
+			return button;
+		}
+
+		private void toggleTask() {
+			if (currentTask == null) return;
+			if (currentTask.isPaused() || !currentTask.isInited()) {
+				HealthTray.resumeTask(currentTask);
+			} else {
+				HealthTray.pauseTask(currentTask);
+			}
+			fireEditingStopped();
+			refresh();
+		}
+
+		@Override
+		public Object getCellEditorValue() {
+			return currentTask;
+		}
+
+		@Override
+		public boolean isCellEditable(EventObject e) {
+			return true;
+		}
+
+		@Override
+		public boolean shouldSelectCell(EventObject e) {
+			return false;
+		}
+
+		@Override
+		public boolean stopCellEditing() {
+			fireEditingStopped();
+			return true;
+		}
+
+		@Override
+		public void cancelCellEditing() {
+			fireEditingCanceled();
 		}
 	}
 }
