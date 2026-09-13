@@ -141,6 +141,33 @@ new UpdateActionTask("Reload config",
         60);
 ```
 
+### CachedSourceAction
+
+An `UpdateActionTask.Action` that caches the content of an `InputStreamSupplier` into a secure
+temporary file, then delegates to an action created from that file. The temporary file (and its
+private parent directory) are always deleted after the inner action runs, regardless of success
+or failure.
+
+This is useful when the source's content needs to be processed by tools that require a file
+(e.g. a command-line utility, a Docker container import, etc.) rather than a stream.
+
+```java
+import java.nio.file.Path;
+import com.fathzer.healthtray.CheckTask.Status;
+import com.fathzer.healthtray.CheckTask.TaskResult;
+import com.fathzer.healthtray.sources.InputStreamSupplier;
+import com.fathzer.healthtray.tasks.CachedSourceAction;
+import com.fathzer.healthtray.tasks.UpdateActionTask;
+
+new UpdateActionTask("Process backup",
+        timestampSupplier,
+        new CachedSourceAction(inputStreamSupplier, tempFile -> () -> {
+            // Process tempFile, e.g. pass it to an external command
+            return new TaskResult(Status.OK, "Backup processed");
+        }),
+        3600);
+```
+
 ## Source Supplier
 
 ### TimestampSupplier
