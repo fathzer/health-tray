@@ -17,7 +17,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -45,7 +44,7 @@ import kotlin.Unit;
  * {@code XDG_CURRENT_DESKTOP} environment variable. In that case, the startup notification becomes
  * persistent (no auto-close, no close button) and can be dragged — it becomes the primary way to
  * interact with the application. Clicking it opens the status window, which has a "Quit" button.
- * <BR>On startup, a notification is shown, then each task's {@link AbstractCheckTask#init() init()} runs
+ * <BR>On startup, a notification is shown, then each task's {@link AbstractCheckTask#init(SavedState) init(SavedState)} runs
  * immediately and {@link AbstractCheckTask#run() run()} is executed every {@link AbstractCheckTask#getPeriod() period}
  * seconds. When a task transitions to {@link AbstractCheckTask.Status#ERROR}, a persistent notification is
  * shown (until recovery or manual close). When it recovers, a short "{@code <name> is ok}"

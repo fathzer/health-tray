@@ -1,18 +1,20 @@
-package com.fathzer.healthtray.tasks;
+package com.fathzer.healthtray.sources;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.time.Instant;
-import java.util.Date;
 
 import com.dropbox.core.DbxException;
 import com.dropbox.core.v2.DbxClientV2;
 import com.dropbox.core.v2.files.FileMetadata;
 import com.dropbox.core.v2.files.Metadata;
+import com.fathzer.healthtray.sources.TimestampSupplier;
 
-/** A {@link TimestampSupplier} backed by a file on Dropbox.
+/** A {@link TimestampSupplier} and {@link InputStreamSupplier} backed by a file on Dropbox.
  * <BR>The timestamp is the file's server-side last modification time, as reported by the
  * Dropbox API. If the file does not exist, is not a file (e.g. a folder), or the API call
  * fails, an {@link IOException} is thrown.
+ * <BR>The input stream downloads the file's content from Dropbox. It must be closed by the caller.
  * <BR><b>This class requires the Dropbox SDK ({@code com.dropbox.core:dropbox-core-sdk}) on the
  * classpath at runtime.</b> It is declared as an optional Maven dependency, so clients who do not
  * need Dropbox support are not forced to include it.
@@ -29,23 +31,28 @@ import com.dropbox.core.v2.files.Metadata;
  * }</pre>
  *   </li>
  * </ol>
- * The access token must have the {@code files.metadata.read} permission to use this supplier.
+ * The access token must have the {@code files.metadata.read} permission for timestamps
+ * and {@code files.content.read} for content downloads.
  * <BR>Example:
  * <pre>{@code
  * ...
- * TimestampSupplier supplier = new DropboxTimestampSupplier(client, "/backup/latest.tar");
+ * DropboxSupplier supplier = new DropboxSupplier(client, "/backup/latest.tar");
+ * Instant timestamp = supplier.get();
+ * try (InputStream in = supplier.get()) {
+ *     // read file content
+ * }
  * }</pre>
  * @see <a href="https://www.dropbox.com/developers/documentation/java">Dropbox Java SDK documentation</a>
  */
-public class DropboxTimestampSupplier implements TimestampSupplier {
+public class DropboxSupplier implements TimestampSupplier, InputStreamSupplier {
 	private final DbxClientV2 client;
 	private final String path;
 
-	/** Creates a {@link TimestampSupplier} backed by a file on Dropbox.
+	/** Creates a {@link DropboxSupplier} backed by a file on Dropbox.
 	 * @param client the Dropbox client (authenticated).
-	 * @param path the Dropbox path of the file to monitor (e.g. {@code "/backup/latest.tar"}).
+	 * @param path the Dropbox path of the file (e.g. {@code "/backup/latest.tar"}).
 	 */
-	public DropboxTimestampSupplier(DbxClientV2 client, String path) {
+	public DropboxSupplier(DbxClientV2 client, String path) {
 		this.client = client;
 		this.path = path;
 	}
@@ -55,12 +62,20 @@ public class DropboxTimestampSupplier implements TimestampSupplier {
 		try {
 			Metadata metadata = client.files().getMetadata(path);
 			if (metadata instanceof FileMetadata file) {
-				Date modified = file.getServerModified();
-				return modified.toInstant();
+				return file.getServerModified().toInstant();
 			}
 			throw new IOException("Not a file: " + path);
 		} catch (DbxException e) {
 			throw new IOException("Dropbox error: " + e.getMessage(), e);
+		}
+	}
+
+	@Override
+	public InputStream open() throws IOException {
+		try {
+			return client.files().download(path).getInputStream();
+		} catch (DbxException e) {
+			throw new IOException("Dropbox download failed: " + e.getMessage(), e);
 		}
 	}
 

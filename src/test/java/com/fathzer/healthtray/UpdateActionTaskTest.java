@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import com.fathzer.healthtray.AbstractCheckTask.Status;
 import com.fathzer.healthtray.AbstractCheckTask.TaskResult;
-import com.fathzer.healthtray.tasks.TimestampSupplier;
+import com.fathzer.healthtray.sources.TimestampSupplier;
 import com.fathzer.healthtray.tasks.UpdateActionTask;
 
 /** Tests for {@link UpdateActionTask}.

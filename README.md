@@ -141,21 +141,43 @@ new UpdateActionTask("Reload config",
         60);
 ```
 
-## TimestampSupplier
+## Source Supplier
+
+### TimestampSupplier
 
 A functional interface that supplies the last update timestamp of a source.
+Implementations should throw `IOException` when the source is unavailable.
+
+### InputStreamSupplier
+
+A functional interface that supplies an `InputStream` for a source.
 Implementations should throw `IOException` when the source is unavailable.
 
 ### Built-in suppliers
 
 | Supplier | Description |
 |----------|-------------|
-| `TimestampSupplier.fromPath(Path)` | Returns a file's last modification time. |
-| `DropboxTimestampSupplier` | Returns a Dropbox file's server-side modification time. |
+| `PathSupplier` | Returns a file's last modification time and input stream. |
+| `DropboxSupplier` | Returns a Dropbox file's server-side modification time and input stream. |
 
-### DropboxTimestampSupplier
+### PathSupplier
 
-A `TimestampSupplier` backed by a file on Dropbox. It uses the Dropbox Java SDK to retrieve
+A `TimestampSupplier` and `InputStreamSupplier` backed by a local file `Path`.
+The timestamp is the file's last modification time, and the input stream opens a new stream
+on the file's content. If the file does not exist or is not readable, an `IOException` is thrown.
+
+```java
+import java.nio.file.Path;
+import com.fathzer.healthtray.sources.PathSupplier;
+
+PathSupplier supplier = new PathSupplier(Path.of("/var/backup/latest.tar"));
+// supplier.get()  -> returns the file's last modification time
+// supplier.open() -> returns a new InputStream on the file's content
+```
+
+### DropboxSupplier
+
+A `TimestampSupplier` and `InputStreamSupplier` backed by a file on Dropbox. It uses the Dropbox Java SDK to retrieve
 the file's server-side last modification time.
 
 **This is an optional integration**: the Dropbox SDK (`com.dropbox.core:dropbox-core-sdk`)

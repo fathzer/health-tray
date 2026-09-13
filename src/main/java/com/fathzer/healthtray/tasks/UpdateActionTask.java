@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Instant;
 
 import com.fathzer.healthtray.AbstractCheckTask;
+import com.fathzer.healthtray.sources.TimestampSupplier;
 
 /** A {@link AbstractCheckTask} that performs an action when a source has been updated since the last run.
  * <BR>The source is represented by a {@link TimestampSupplier}. On each run, the task compares the

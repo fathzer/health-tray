@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.Instant;
 
 import com.fathzer.healthtray.AbstractCheckTask;
+import com.fathzer.healthtray.sources.TimestampSupplier;
 
 /** A {@link AbstractCheckTask} that verifies a source has been updated more recently than a maximum age.
  * <BR>The source is represented by a {@link TimestampSupplier} that returns the source's last
