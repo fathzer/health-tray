@@ -2,8 +2,11 @@ package com.fathzer.healthtray.tasks;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.fathzer.healthtray.AbstractCheckTask;
+import com.fathzer.healthtray.HealthTray;
 import com.fathzer.healthtray.sources.TimestampSupplier;
 import com.fathzer.healthtray.tasks.actions.Action;
 
@@ -30,6 +33,7 @@ import com.fathzer.healthtray.tasks.actions.Action;
  * }</pre>
  */
 public class UpdateActionTask extends AbstractCheckTask {
+	private static final Logger LOGGER = Logger.getLogger(HealthTray.class.getName());
 	private final TimestampSupplier timestampSupplier;
 	private final Action action;
 
@@ -62,6 +66,7 @@ public class UpdateActionTask extends AbstractCheckTask {
 		try {
 			return action.run();
 		} catch (IOException e) {
+			LOGGER.log(Level.WARNING, "Error running action", e);
 			return new TaskResult(Status.ERROR, e.getClass().getSimpleName() + ": " + e.getMessage());
 		}
 	}

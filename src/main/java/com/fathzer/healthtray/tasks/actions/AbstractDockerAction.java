@@ -7,6 +7,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.fathzer.healthtray.AbstractCheckTask.TaskResult;
 
@@ -23,6 +25,7 @@ import com.fathzer.healthtray.AbstractCheckTask.TaskResult;
  * </ul>
  */
 public abstract class AbstractDockerAction implements Action {
+	private static final Logger LOGGER = Logger.getLogger(AbstractDockerAction.class.getName());
 	private static final String DOCKER = locateDocker();
 	private static final long STARTUP_TIMEOUT_SECONDS = 90;
 	private static final long STARTUP_POLL_INTERVAL_MS = 1000;
@@ -72,12 +75,14 @@ public abstract class AbstractDockerAction implements Action {
 		}
 	}
 
-	/** Returns the container name, for use by subclasses when running commands inside it. */
+	/** Returns the container name, for use by subclasses when running commands inside it.
+	 * @return the container name. */
 	protected String getContainerName() {
 		return containerName;
 	}
 
-	/** Returns the Docker executable path. */
+	/** Returns the Docker executable path.
+	 * @return the Docker executable path. */
 	protected String getDocker() {
 		return DOCKER;
 	}
@@ -141,14 +146,17 @@ public abstract class AbstractDockerAction implements Action {
 		}
 		command.add(image);
 		runCommand(command.toArray(new String[0]), true);
+		LOGGER.info(() -> "Started container " + containerName);
 	}
 
 	private void destroyContainer() {
 		try {
 			runCommand(new String[]{DOCKER, "rm", "-f", containerName}, false);
+			LOGGER.info(() -> "Removed container " + containerName);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		} catch (IOException e) {
+			LOGGER.log(Level.WARNING, e, () -> "Failed to remove container " + containerName);
 			// Best-effort cleanup: ignore failures during shutdown.
 		}
 	}
