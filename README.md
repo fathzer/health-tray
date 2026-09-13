@@ -66,6 +66,28 @@ public class MyApp {
 That's it. The tray icon appears, checks run immediately and then at their configured period,
 and you get notifications on failures and recoveries.
 
+## Table of contents
+
+- [Built-in checks](#built-in-checks)
+  - [HttpCheckTask](#httpchecktask)
+  - [FreshnessCheckTask](#freshnesschecktask)
+  - [UpdateActionTask](#updateactiontask)
+  - [CachedSourceAction](#cachedsourceaction)
+  - [AbstractDockerAction](#abstractdockeraction)
+- [Source suppliers](#source-suppliers)
+  - [TimestampSupplier](#timestampsupplier)
+  - [InputStreamSupplier](#inputstreamsupplier)
+  - [Built-in suppliers](#built-in-suppliers)
+  - [PathSupplier](#pathsupplier)
+  - [DropboxSupplier](#dropboxsupplier)
+- [Creating custom checks](#creating-custom-checks)
+- [State persistence](#state-persistence)
+- [No-tray mode (GNOME Shell and others)](#no-tray-mode-gnome-shell-and-others)
+  - [Automatic detection](#automatic-detection)
+  - [Manual override](#manual-override)
+  - [Impact on the UI](#impact-on-the-ui)
+- [License](#license)
+
 ## Built-in checks
 
 ### HttpCheckTask
@@ -168,7 +190,45 @@ new UpdateActionTask("Process backup",
         3600);
 ```
 
-## Source Supplier
+### AbstractDockerAction
+
+An abstract `Action` that runs a verification inside a temporary Docker container. The container
+is started with the configured image and environment variables, then the action waits for the
+container to become ready, performs the verification, and always destroys the container afterward.
+
+Subclasses implement three methods:
+- `getEnv()` — environment variables for the container (empty by default).
+- `waitForReady()` — waits until the container's service is available (use `pollUntilReady` helper).
+- `verify()` — performs the actual verification and returns a `TaskResult`.
+
+```java
+import com.fathzer.healthtray.CheckTask.Status;
+import com.fathzer.healthtray.CheckTask.TaskResult;
+import com.fathzer.healthtray.tasks.actions.AbstractDockerAction;
+
+public class RedisDockerAction extends AbstractDockerAction {
+    public RedisDockerAction() {
+        super("redis:7");
+    }
+
+    @Override
+    protected void waitForReady() throws IOException, InterruptedException {
+        pollUntilReady(new String[]{"redis-cli", "ping"});
+    }
+
+    @Override
+    protected TaskResult verify() throws IOException, InterruptedException {
+        int exit = runCommand(new String[]{
+            getDocker(), "exec", getContainerName(), "redis-cli", "INFO"
+        }, false);
+        return exit == 0
+            ? new TaskResult(Status.OK, "Redis is up")
+            : new TaskResult(Status.ERROR, "Redis verification failed");
+    }
+}
+```
+
+## Source suppliers
 
 ### TimestampSupplier
 

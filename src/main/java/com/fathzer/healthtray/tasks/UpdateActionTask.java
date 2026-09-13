@@ -5,6 +5,7 @@ import java.time.Instant;
 
 import com.fathzer.healthtray.AbstractCheckTask;
 import com.fathzer.healthtray.sources.TimestampSupplier;
+import com.fathzer.healthtray.tasks.actions.Action;
 
 /** A {@link AbstractCheckTask} that performs an action when a source has been updated since the last run.
  * <BR>The source is represented by a {@link TimestampSupplier}. On each run, the task compares the
@@ -29,18 +30,6 @@ import com.fathzer.healthtray.sources.TimestampSupplier;
  * }</pre>
  */
 public class UpdateActionTask extends AbstractCheckTask {
-	/** Functional interface representing the action to perform when the source is updated.
-	 * <BR>Implementations return a {@link TaskResult} describing the outcome of the action.
-	 * They may throw {@link IOException} to signal an unexpected failure.
-	 */
-	@FunctionalInterface
-	public interface Action {
-		/** Performs the action.
-		 * @return the {@link TaskResult} describing the outcome of the action.
-		 * @throws IOException if the action fails unexpectedly. */
-		TaskResult run() throws IOException;
-	}
-
 	private final TimestampSupplier timestampSupplier;
 	private final Action action;
 

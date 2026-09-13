@@ -1,4 +1,4 @@
-package com.fathzer.healthtray.tasks;
+package com.fathzer.healthtray.tasks.actions;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,7 +11,7 @@ import java.util.function.Function;
 import com.fathzer.healthtray.AbstractCheckTask.TaskResult;
 import com.fathzer.healthtray.sources.InputStreamSupplier;
 
-/** An {@link UpdateActionTask.Action} that caches the content of an {@link InputStreamSupplier}
+/** An {@link Action} that caches the content of an {@link InputStreamSupplier}
  * into a secure temporary file, then delegates to an action created from that file.
  * <BR>The temporary file (and its private parent directory) are always deleted after the inner
  * action runs, regardless of success or failure.
@@ -25,16 +25,16 @@ import com.fathzer.healthtray.sources.InputStreamSupplier;
  * });
  * }</pre>
  */
-public class CachedSourceAction implements UpdateActionTask.Action {
+public class CachedSourceAction implements Action {
 	private final InputStreamSupplier inputStreamSupplier;
-	private final Function<Path, UpdateActionTask.Action> actionFactory;
+	private final Function<Path, Action> actionFactory;
 
 	/** Creates a {@link CachedSourceAction}.
 	 * @param inputStreamSupplier supplies the source's content as an {@link InputStream}.
-	 * @param actionFactory creates the {@link UpdateActionTask.Action} to run from the temporary
+	 * @param actionFactory creates the {@link Action} to run from the temporary
 	 *        file containing the cached source's content.
 	 */
-	public CachedSourceAction(InputStreamSupplier inputStreamSupplier, Function<Path, UpdateActionTask.Action> actionFactory) {
+	public CachedSourceAction(InputStreamSupplier inputStreamSupplier, Function<Path, Action> actionFactory) {
 		this.inputStreamSupplier = inputStreamSupplier;
 		this.actionFactory = actionFactory;
 	}
