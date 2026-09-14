@@ -144,8 +144,8 @@ new FreshnessCheckTask("Backup freshness",
 Performs an action when a source has been updated since the last run.
 On the first run (no previous check recorded), the action is always triggered.
 On subsequent runs, the action is triggered only if the source's timestamp is more recent
-than the last check. When the source has not been updated, the previous `TaskResult` is
-returned unchanged.
+than the last check or if the previous result was an error. When the source has not been updated
+and the previous result was successful, the previous `TaskResult` is returned unchanged.
 
 ```java
 import java.nio.file.Path;

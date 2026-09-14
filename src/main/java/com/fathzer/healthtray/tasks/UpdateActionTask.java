@@ -33,7 +33,7 @@ import com.fathzer.healthtray.tasks.actions.Action;
  * }</pre>
  */
 public class UpdateActionTask extends AbstractCheckTask {
-	private static final Logger LOGGER = Logger.getLogger(HealthTray.class.getName());
+	private static final Logger LOGGER = Logger.getLogger(UpdateActionTask.class.getName());
 	private final TimestampSupplier timestampSupplier;
 	private final Action action;
 
@@ -57,10 +57,10 @@ public class UpdateActionTask extends AbstractCheckTask {
 		} catch (IOException e) {
 			return new TaskResult(Status.ERROR, "Source unavailable");
 		}
-		// First run (no previous check recorded): always trigger the action.
+		// First run (no previous check recorded or previous run was KO): always trigger the action.
 		// Subsequent runs: trigger only if the source has been updated since the last run.
 		Instant lastCheck = getLastCheck();
-		if (lastCheck != null && !timestamp.isAfter(lastCheck)) {
+		if (lastCheck != null && !timestamp.isAfter(lastCheck) && getStatus() == Status.OK) {
 			return new TaskResult(getStatus(), getMessage());
 		}
 		try {

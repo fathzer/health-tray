@@ -65,7 +65,7 @@ class UpdateActionTaskTest {
 	}
 
 	@Test
-	void sourceNotUpdated_returnsPreviousResult_doesNotTriggerAction() {
+	void sourceNotUpdated_returnsPreviousOkResult_doesNotTriggerAction() {
 		AtomicInteger callCount = new AtomicInteger();
 		Instant fixed = Instant.now();
 		UpdateActionTask task = new UpdateActionTask("Test", () -> fixed,
@@ -126,7 +126,7 @@ class UpdateActionTaskTest {
 	}
 
 	@Test
-	void sourceNotUpdated_afterErrorRun_returnsPreviousErrorResult() {
+	void sourceNotUpdated_afterErrorRun_triggersAction() {
 		AtomicInteger callCount = new AtomicInteger();
 		Instant fixed = Instant.now();
 		UpdateActionTask task = new UpdateActionTask("Test", () -> fixed,
@@ -134,7 +134,7 @@ class UpdateActionTaskTest {
 					int n = callCount.incrementAndGet();
 					return n == 1
 							? new TaskResult(Status.ERROR, "First run error")
-							: new TaskResult(Status.OK, "Should not happen");
+							: new TaskResult(Status.OK, "Second run ok");
 				},
 				60);
 
@@ -144,10 +144,10 @@ class UpdateActionTaskTest {
 		assertEquals("First run error", first.message());
 		assertEquals(1, callCount.get());
 
-		// Second run: source unchanged, should return previous ERROR result without calling action
+		// Second run: source unchanged, should call action
 		TaskResult second = task.run();
-		assertEquals(Status.ERROR, second.type());
-		assertEquals("First run error", second.message());
-		assertEquals(1, callCount.get(), "Action should not be triggered when source is not updated");
+		assertEquals(Status.OK, second.type());
+		assertEquals("Second run ok", second.message());
+		assertEquals(2, callCount.get());
 	}
 }
