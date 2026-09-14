@@ -21,24 +21,19 @@ class NotificationManager implements AbstractCheckTask.Listener {
 	private static final int RECOVERY_DURATION_MS = 10_000;
 
 	private final List<AbstractCheckTask> tasks;
-	private volatile Runnable onNotificationClick = () -> {};
+	private final Runnable onNotificationClick;
 	private final Map<String, Notify> activeErrors = new ConcurrentHashMap<>();
 
 	/** Creates a notification manager and subscribes to the given tasks.
-	 * <BR>Use {@link #setOnNotificationClick(Runnable)} to set the click handler after construction
-	 * (useful when the click handler depends on another component that depends on this manager).
 	 * @param tasks the tasks to monitor for state changes.
+	 * @param onNotificationClick the action invoked when the user clicks on any notification.
 	 */
-	public NotificationManager(List<AbstractCheckTask> tasks) {
+	public NotificationManager(List<AbstractCheckTask> tasks, Runnable onNotificationClick) {
 		this.tasks = tasks;
+		this.onNotificationClick = onNotificationClick;
 		for (AbstractCheckTask task : tasks) {
 			task.addListener(this);
 		}
-	}
-
-	/** Sets the action invoked when the user clicks on any notification. */
-	public void setOnNotificationClick(Runnable onNotificationClick) {
-		this.onNotificationClick = onNotificationClick;
 	}
 
 	@Override

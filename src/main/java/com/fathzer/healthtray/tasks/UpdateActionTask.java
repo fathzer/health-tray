@@ -6,7 +6,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.fathzer.healthtray.AbstractCheckTask;
-import com.fathzer.healthtray.HealthTray;
 import com.fathzer.healthtray.sources.TimestampSupplier;
 import com.fathzer.healthtray.tasks.actions.Action;
 

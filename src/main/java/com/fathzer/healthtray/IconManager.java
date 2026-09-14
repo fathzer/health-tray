@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import javax.imageio.ImageIO;
-import javax.swing.SwingUtilities;
 
 /** Manages an icon that reflects the overall health of all {@link AbstractCheckTask}s.
  * <BR>The icon can be in one of three states:

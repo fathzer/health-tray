@@ -155,9 +155,13 @@ public class HealthTray {
 		persistence = new StatePersistence(stateFile);
 		HealthTray.tasks = originalTasks;
 
-		notificationManager = new NotificationManager(originalTasks);
+		// Break the circular dependency: NotificationManager needs StatusWindow's showOnEdt (for click),
+		// and StatusWindow needs NotificationManager's restore (for the restore button).
+		// Use a delegate that is set after both are constructed.
+		final Runnable[] clickDelegate = { () -> {} };
+		notificationManager = new NotificationManager(originalTasks, clickDelegate[0]::run);
 		StatusWindow statusWindow = new StatusWindow(originalTasks, appName, notificationManager::restore, HealthTray::quit);
-		notificationManager.setOnNotificationClick(statusWindow::showOnEdt);
+		clickDelegate[0] = statusWindow::showOnEdt;
 
 		// 1. Create the IconManager on all tasks. Icon starts grey (no task is initialized yet).
 		//    It subscribes to task events and will update automatically as tasks are initialized, paused, or change status.
