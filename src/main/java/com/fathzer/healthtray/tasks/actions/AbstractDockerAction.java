@@ -94,14 +94,31 @@ public abstract class AbstractDockerAction implements Action {
 	 * @throws IOException if the container does not become ready within the startup timeout.
 	 * @throws InterruptedException if the thread is interrupted while waiting. */
 	protected void pollUntilReady(String[] pingCommand) throws IOException, InterruptedException {
+		pollUntilReady(pingCommand, List.of());
+	}
+
+	/** Polls a readiness command inside the container until it returns exit code 0 or the
+	 * startup timeout elapses.
+	 * @param pingCommand the command to run inside the container (without the {@code docker exec}
+	 *        prefix, which is added automatically).
+	 * @param execEnv environment variables to pass to the {@code docker exec} command
+	 *        (each entry in {@code KEY=VALUE} format, may be empty).
+	 * @throws IOException if the container does not become ready within the startup timeout.
+	 * @throws InterruptedException if the thread is interrupted while waiting. */
+	protected void pollUntilReady(String[] pingCommand, List<String> execEnv) throws IOException, InterruptedException {
 		Instant deadline = Instant.now().plusSeconds(STARTUP_TIMEOUT_SECONDS);
 		while (Instant.now().isBefore(deadline)) {
 			try {
-				String[] fullCommand = new String[pingCommand.length + 3];
-				fullCommand[0] = DOCKER;
-				fullCommand[1] = "exec";
-				fullCommand[2] = containerName;
-				System.arraycopy(pingCommand, 0, fullCommand, 3, pingCommand.length);
+				String[] fullCommand = new String[pingCommand.length + 3 + execEnv.size() * 2];
+				int i = 0;
+				fullCommand[i++] = DOCKER;
+				fullCommand[i++] = "exec";
+				for (String env : execEnv) {
+					fullCommand[i++] = "-e";
+					fullCommand[i++] = env;
+				}
+				fullCommand[i++] = containerName;
+				System.arraycopy(pingCommand, 0, fullCommand, i, pingCommand.length);
 				int exit = runCommand(fullCommand, false);
 				if (exit == 0) {
 					return;
