@@ -62,10 +62,11 @@ class StatusWindow implements AbstractCheckTask.Listener {
 	/** Creates a status window bound to the given tasks.
 	 * <BR>Automatically subscribes to each task's check-done events.
 	 * @param tasks the tasks to display.
+	 * @param appName the application name (used in the window title).
 	 * @param restoreAction action invoked when the user clicks the "Restore" button.
 	 * @param quitAction action invoked when the user clicks the "Quit" button.
 	 */
-	public StatusWindow(List<AbstractCheckTask> tasks, Runnable restoreAction, Runnable quitAction) {
+	StatusWindow(List<AbstractCheckTask> tasks, String appName, Runnable restoreAction, Runnable quitAction) {
 		this.tasks = tasks;
 		this.model = new DefaultTableModel(COLUMNS, 0) {
 			@Override
@@ -120,10 +121,10 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		content.add(new JScrollPane(table), BorderLayout.CENTER);
 		content.add(bottom, BorderLayout.SOUTH);
 
-		this.frame = new JFrame("HealthTray - Status");
+		this.frame = new JFrame(appName + " - Status");
 		frame.setDefaultCloseOperation(WindowConstants.HIDE_ON_CLOSE);
 		frame.setContentPane(content);
-		frame.setSize(820, 240);
+		frame.setSize(1000, 520);
 		frame.setLocationRelativeTo(null);
 
 		for (AbstractCheckTask task : tasks) {
@@ -142,8 +143,8 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		// State column: fit "ERROR" (the longest status) plus padding.
 		int stateWidth = fm.stringWidth("ERROR") + 20;
 		setFixedWidth(table, STATE_COL, stateWidth);
-		// Period column: fit the longest period string we might produce (e.g. "999d").
-		int periodWidth = fm.stringWidth("999d") + 20;
+		// Period column: fit the longest dual period string (e.g. "999d / 999d").
+		int periodWidth = fm.stringWidth("999d / 999d") + 20;
 		setFixedWidth(table, PERIOD_COL, periodWidth);
 		// Last check and Last change columns: fit the worst-case date string.
 		int dateWidth = fm.stringWidth(DATE_SAMPLE) + 20;
@@ -261,7 +262,9 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		}
 	}
 
-	/** Renders a period in seconds as {@code Xd Xh Xm Xs} (only non-zero parts are shown). */
+	/** Renders a period in seconds as {@code Xd Xh Xm Xs} (only non-zero parts are shown).
+	 * <BR>If the task has a different error period, both periods are shown:
+	 * {@code success / error} (e.g. {@code 1h / 5mn}). */
 	@SuppressWarnings("serial")
 	private static final class PeriodCellRenderer extends DefaultTableCellRenderer {
 		@Override
@@ -272,7 +275,11 @@ class StatusWindow implements AbstractCheckTask.Listener {
 			AbstractCheckTask task = getTaskAt(table, row);
 			label.setForeground(getLabelColor(table, task));
 			if (value instanceof Long period) {
-				label.setText(formatPeriod(period));
+				String text = formatPeriod(period);
+				if (task != null && task.getErrorPeriod() != task.getPeriod()) {
+					text += " / " + formatPeriod(task.getErrorPeriod());
+				}
+				label.setText(text);
 			} else {
 				label.setText("-");
 			}

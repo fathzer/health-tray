@@ -51,14 +51,15 @@ import kotlin.Unit;
  * notification is displayed.
  * <BR>Task state (status, message, timestamps) is persisted to a file on shutdown and restored on
  * the next startup.
- * <BR>Usage: call {@link #launch(List)} from the EDT (or any thread; it will be marshalled to the EDT)
- * with the list of tasks to monitor.
+ * <BR>Usage: create a builder with {@link #builder()}, configure it with tasks (and optionally a
+ * custom name and state file), then call {@link Builder#launch()} to start the application.
  */
 public class HealthTray {
 	private static final Logger LOGGER = Logger.getLogger(HealthTray.class.getName());
 	private static final int NOTIFICATION_DURATION_MS = 10_000;
 	private static final Path DEFAULT_STATE_FILE = Path.of("health-state.properties");
 	private static final String NO_TRAY_PROP = "healthtray.noTray";
+	private static final String DEFAULT_APP_NAME = "Health Tray";
 
 	private static ScheduledExecutorService scheduler;
 	private static NotificationManager notificationManager;
@@ -66,28 +67,76 @@ public class HealthTray {
 	private static StatePersistence persistence;
 	private static Notify startupNotification;
 	private static IconManager iconManager;
+	private static String appName = DEFAULT_APP_NAME;
 	private static final java.util.Map<AbstractCheckTask, java.util.concurrent.ScheduledFuture<?>> scheduledFutures = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private HealthTray() {
 		// To prevent instantiation
 	}
 
-	/** Launches the tray application with the given tasks and the default state file
-	 * ({@code health-state.properties} in the working directory).
-	 * <BR>This method must be called once; it sets up the tray icon, notification system, status
-	 * window, and scheduler. It returns immediately; the application runs until {@link System#exit}
-	 * is called (e.g. via the "Quit" button).
-	 * @param taskList the tasks to monitor.
+	/** Builder for configuring and launching a {@link HealthTray} application.
+	 * <BR>Example:
+	 * <pre>{@code
+	 * HealthTray.builder()
+	 *     .name("My Monitor")
+	 *     .tasks(List.of(task1, task2))
+	 *     .stateFile(Path.of("my-state.properties"))
+	 *     .launch();
+	 * }</pre>
 	 */
-	public static void launch(List<AbstractCheckTask> taskList) {
-		launch(taskList, DEFAULT_STATE_FILE);
+	public static final class Builder {
+		private List<AbstractCheckTask> taskList;
+		private Path stateFile = DEFAULT_STATE_FILE;
+		private String name = DEFAULT_APP_NAME;
+
+		private Builder() {
+		}
+
+		/** Sets the tasks to monitor.
+		 * @param tasks the tasks to monitor.
+		 * @return this builder for method chaining. */
+		public Builder tasks(List<AbstractCheckTask> tasks) {
+			this.taskList = tasks;
+			return this;
+		}
+
+		/** Sets the application name (displayed in notifications, tray icon tooltip, and window title).
+		 * @param name the application name (default: {@code "Health Tray"}).
+		 * @return this builder for method chaining. */
+		public Builder name(String name) {
+			this.name = name;
+			return this;
+		}
+
+		/** Sets the file used to persist/restore task state across restarts.
+		 * @param stateFile the state file (default: {@code health-state.properties} in the working directory).
+		 * @return this builder for method chaining. */
+		public Builder stateFile(Path stateFile) {
+			this.stateFile = stateFile;
+			return this;
+		}
+
+		/** Launches the application with the configured settings.
+		 * <BR>This method returns immediately; the application runs until {@link System#exit}
+		 * is called (e.g. via the "Quit" button). */
+		public void launch() {
+			HealthTray.launch(taskList, stateFile, name);
+		}
 	}
 
-	/** Launches the tray application with the given tasks and a custom state file.
+	/** Creates a new {@link Builder} for configuring and launching the application.
+	 * @return a new builder instance. */
+	public static Builder builder() {
+		return new Builder();
+	}
+
+	/** Launches the tray application with the given tasks, a custom state file, and a custom application name.
 	 * @param taskList the tasks to monitor.
 	 * @param stateFile the file used to persist/restore task state across restarts.
+	 * @param appName the application name (displayed in notifications, tray icon tooltip, and window title).
 	 */
-	public static void launch(List<AbstractCheckTask> taskList, Path stateFile) {
+	private static void launch(List<AbstractCheckTask> taskList, Path stateFile, String appName) {
+		HealthTray.appName = appName;
 		SwingUtilities.invokeLater(() -> start(taskList, stateFile));
 	}
 
@@ -107,7 +156,7 @@ public class HealthTray {
 		HealthTray.tasks = originalTasks;
 
 		notificationManager = new NotificationManager(originalTasks);
-		StatusWindow statusWindow = new StatusWindow(originalTasks, notificationManager::restore, HealthTray::quit);
+		StatusWindow statusWindow = new StatusWindow(originalTasks, appName, notificationManager::restore, HealthTray::quit);
 		notificationManager.setOnNotificationClick(statusWindow::showOnEdt);
 
 		// 1. Create the IconManager on all tasks. Icon starts grey (no task is initialized yet).
@@ -168,11 +217,11 @@ public class HealthTray {
 	 */
 	private static IconManager createIconManager(boolean noTray, List<AbstractCheckTask> tasks, StatusWindow statusWindow) {
 		if (noTray) {
-			Notify notify = showCompactNotification("Health Tray", statusWindow::showOnEdt);
+			Notify notify = showCompactNotification(appName, statusWindow::showOnEdt);
 			startupNotification = notify;
 			return new IconManager(img -> SwingUtilities.invokeLater(() -> notify.setImage(new ImageIcon(img.getScaledInstance(20, 20, Image.SCALE_SMOOTH)))), tasks);
 		} else {
-			TrayIcon icon = new TrayIcon(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), "HealthTray");
+			TrayIcon icon = new TrayIcon(new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), appName);
 			icon.setImageAutoSize(true);
 			icon.addActionListener(e -> statusWindow.show());
 			icon.addMouseListener(new MouseAdapter() {
@@ -211,7 +260,7 @@ public class HealthTray {
 			// In no-tray mode, the compact notification is already showing with the grey icon.
 			// Just show an additional error notification.
 			Notify notify = Notify.Companion.create()
-					.title("HealthTray - Configuration error")
+					.title(appName + " - Configuration error")
 					.text(message)
 					.theme(Theme.Companion.getDefaultDark())
 					.position(Position.BOTTOM_RIGHT)
@@ -223,7 +272,7 @@ public class HealthTray {
 			notify.showError();
 		} else {
 			Notify notify = Notify.Companion.create()
-					.title("HealthTray - Configuration error")
+					.title(appName + " - Configuration error")
 					.text(message)
 					.theme(Theme.Companion.getDefaultDark())
 					.position(Position.BOTTOM_RIGHT)
@@ -244,7 +293,7 @@ public class HealthTray {
 	 */
 	private static void showStartupNotification(boolean noTray, StatusWindow statusWindow) {
 		if (!noTray) {
-			startupNotification = notify("HealthTray", "Surveillance activée", AbstractCheckTask.Status.OK, statusWindow::showOnEdt);
+			startupNotification = notify(appName, "Surveillance activée", AbstractCheckTask.Status.OK, statusWindow::showOnEdt);
 		}
 	}
 
@@ -363,16 +412,27 @@ public class HealthTray {
 
 	/** Schedules a task for periodic execution if it is running.
 	 * <BR>Does nothing if the task is not in the RUNNING activation state.
+	 * <BR>The task is scheduled with a delay that depends on the previous result: the success period
+	 * after a successful check, the error period after a failed check.
 	 * @param task the task to schedule.
 	 */
 	private static void scheduleTask(AbstractCheckTask task) {
 		if (task.getActivationState() != AbstractCheckTask.ActivationState.RUNNING) {
 			return;
 		}
-		long period = task.getPeriod();
+		long period = getNextPeriod(task);
 		long initialDelay = computeInitialDelay(task, period);
-		ScheduledFuture<?> future = scheduler.scheduleAtFixedRate(() -> safeRun(task), initialDelay, period, TimeUnit.SECONDS);
+		ScheduledFuture<?> future = scheduler.schedule(() -> safeRun(task), initialDelay, TimeUnit.SECONDS);
 		scheduledFutures.put(task, future);
+	}
+
+	/** Returns the period to use for the next run of a task, based on its current status.
+	 * @param task the task.
+	 * @return the success period if the last check was OK (or no check has been run yet),
+	 *         the error period otherwise. */
+	private static long getNextPeriod(AbstractCheckTask task) {
+		AbstractCheckTask.Status status = task.getStatus();
+		return status == AbstractCheckTask.Status.ERROR ? task.getErrorPeriod() : task.getPeriod();
 	}
 
 	/** Pauses a task: cancels its scheduled execution and stops it.
@@ -415,6 +475,8 @@ public class HealthTray {
 	}
 
 	/** Runs a task safely, catching and logging any exception so that the scheduled execution is not suppressed.
+	 * <BR>After the task runs, it is rescheduled with the period corresponding to its new status
+	 * (success period after OK, error period after ERROR).
 	 * @param task the task to run.
 	 */
 	private static void safeRun(AbstractCheckTask task) {
@@ -422,6 +484,12 @@ public class HealthTray {
 			task.run();
 		} catch (RuntimeException e) {
 			LOGGER.log(Level.SEVERE, e, () -> "Error during run of task " + task.getName());
+		}
+		// Reschedule with the period corresponding to the new status.
+		if (task.getActivationState() == AbstractCheckTask.ActivationState.RUNNING) {
+			long period = getNextPeriod(task);
+			ScheduledFuture<?> future = scheduler.schedule(() -> safeRun(task), period, TimeUnit.SECONDS);
+			scheduledFutures.put(task, future);
 		}
 	}
 

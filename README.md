@@ -24,7 +24,7 @@ and alerts the user when something goes wrong. It handles all the boilerplate fo
 - **Duplicate name detection**: if two tasks share the same name, the application refuses to start
   and shows a configuration error notification with a gray tray icon.
 
-You only need to provide the list of `CheckTask` instances and call `HealthTray.launch(...)`.
+You only need to provide the list of `CheckTask` instances and call `HealthTray.builder().tasks(...).launch()`.
 
 ## Requirements
 
@@ -55,10 +55,12 @@ import java.util.List;
 
 public class MyApp {
     public static void main(String[] args) {
-        HealthTray.launch(List.of(
-            HttpCheckTask.builder("My site", "https://example.com/health", 60).build(),
-            HttpCheckTask.builder("API", "https://api.example.com/ping", 30).build()
-        ));
+        HealthTray.builder()
+            .tasks(List.of(
+                HttpCheckTask.builder("My site", "https://example.com/health", 60).build(),
+                HttpCheckTask.builder("API", "https://api.example.com/ping", 30).build()
+            ))
+            .launch();
     }
 }
 ```
@@ -355,7 +357,7 @@ public class StatusFileCheck extends CheckTask {
 Task state is saved to a properties file on shutdown and restored on the next startup.
 
 - **Default file**: `health-state.properties` in the working directory.
-- **Custom file**: pass a `Path` to `HealthTray.launch(tasks, stateFile)`.
+- **Custom file**: pass a `Path` to `HealthTray.builder().tasks(tasks).stateFile(stateFile).launch()`.
 
 The merge logic on startup is:
 - The saved state is restored first (status, message, `lastCheck`, `lastChange`).

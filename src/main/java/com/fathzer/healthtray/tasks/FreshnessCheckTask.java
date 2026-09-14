@@ -47,8 +47,47 @@ public class FreshnessCheckTask extends AbstractCheckTask {
 		Instant now = Instant.now();
 		Duration age = Duration.between(timestamp, now);
 		if (age.compareTo(maxAge) > 0) {
-			return new TaskResult(Status.ERROR, "Stale: last update " + age.toHours() + "h ago (max " + maxAge.toHours() + "h)");
+			return new TaskResult(Status.ERROR, "Stale: last update " + formatDuration(age) + " ago (max " + formatDuration(maxAge) + ")");
 		}
-		return new TaskResult(Status.OK, "Fresh: updated " + age.toMinutes() + "min ago");
+		return new TaskResult(Status.OK, "Fresh: updated " + formatDuration(age) + " ago");
+	}
+
+	/** Formats a duration as a compact, human-readable string using US-style units.
+	 * <BR>Only the two most significant non-zero parts are shown, e.g.:
+	 * <ul>
+	 *   <li>{@code 1d 2h} for 26 hours</li>
+	 *   <li>{@code 3h 20min} for 3 hours 20 minutes</li>
+	 *   <li>{@code 45min} for 45 minutes</li>
+	 *   <li>{@code 30s} for 30 seconds</li>
+	 * </ul>
+	 * @param duration the duration to format (must be non-negative).
+	 * @return a compact string representation. */
+	private static String formatDuration(Duration duration) {
+		long seconds = duration.getSeconds();
+		long days = seconds / 86_400;
+		long hours = (seconds % 86_400) / 3_600;
+		long minutes = (seconds % 3_600) / 60;
+		long secs = seconds % 60;
+		StringBuilder sb = new StringBuilder();
+		int parts = 0;
+		if (days > 0) {
+			sb.append(days).append("d");
+			parts++;
+		}
+		if (hours > 0) {
+			if (parts > 0) sb.append(' ');
+			sb.append(hours).append("h");
+			parts++;
+		}
+		if (minutes > 0 && parts < 2) {
+			if (parts > 0) sb.append(' ');
+			sb.append(minutes).append("min");
+			parts++;
+		}
+		if (secs > 0 && parts < 2) {
+			if (parts > 0) sb.append(' ');
+			sb.append(secs).append("s");
+		}
+		return sb.isEmpty() ? "0s" : sb.toString();
 	}
 }

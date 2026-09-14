@@ -85,6 +85,7 @@ public abstract class AbstractCheckTask {
 
     private final String name;
     private final long periodSeconds;
+    private long errorPeriodSeconds;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
 
     private volatile Status status;
@@ -101,14 +102,29 @@ public abstract class AbstractCheckTask {
     protected AbstractCheckTask(String name, long periodSeconds) {
         this.name = name;
         this.periodSeconds = periodSeconds;
+        this.errorPeriodSeconds = periodSeconds;
     }
 
 	/** Gets the task name.
 	 * @return the task name (displayed in notifications and the status window). */
     public final String getName() { return name; }
-	/** Gets the period between two checks.
-	 * @return the period in seconds between two checks. */
+	/** Gets the period between two checks when the previous check succeeded.
+	 * @return the period in seconds between two checks (after success). */
     public final long getPeriod() { return periodSeconds; }
+	/** Gets the period between two checks when the previous check failed.
+	 * <BR>By default, this is the same as {@link #getPeriod()}. Use {@link #withErrorPeriod(long)}
+	 * to set a different period after errors (e.g. to retry more frequently).
+	 * @return the period in seconds between two checks (after error). */
+    public final long getErrorPeriod() { return errorPeriodSeconds; }
+	/** Sets the period to use when the previous check failed.
+	 * <BR>This allows retrying failed checks more (or less) frequently than successful ones.
+	 * By default, the error period is the same as the success period.
+	 * @param errorPeriodSeconds the period in seconds between two checks after an error.
+	 * @return this task for method chaining. */
+    public final AbstractCheckTask withErrorPeriod(long errorPeriodSeconds) {
+        this.errorPeriodSeconds = errorPeriodSeconds;
+        return this;
+    }
 	/** Gets the current status.
 	 * @return the current status, or {@code null} if no check has been run yet. */
     public final Status getStatus() { return status; }
