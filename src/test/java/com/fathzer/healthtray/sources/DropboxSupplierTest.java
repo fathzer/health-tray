@@ -16,7 +16,6 @@ import com.dropbox.core.DbxException;
 import com.dropbox.core.v2.DbxClientV2;
 import com.dropbox.core.v2.files.FileMetadata;
 import com.dropbox.core.v2.files.FolderMetadata;
-import com.fathzer.healthtray.sources.DropboxSupplier;
 import com.dropbox.core.v2.files.DbxUserFilesRequests;
 
 /** Tests for {@link DropboxSupplier} using Mockito to mock the Dropbox SDK.

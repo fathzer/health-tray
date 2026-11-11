@@ -18,7 +18,8 @@ and alerts the user when something goes wrong. It handles all the boilerplate fo
   - Persistent error notifications that stay visible until the check recovers or the user closes them.
   - A short recovery notification ("&lt;name&gt; is ok") when a failed check returns to OK.
 - A **status window** showing a live table of all checks (name, state, message, period, last check,
-  last change time), refreshed in real time.
+  last change time), refreshed in real time. Clicking a cell of the "Message" column shows the
+  full message in a scrollable panel that can be closed with its "×" button.
 - **State persistence**: task status, message, and timestamps are saved on shutdown and restored on
   the next startup, so transient errors are not lost across restarts.
 - **Duplicate name detection**: if two tasks share the same name, the application refuses to start
@@ -40,7 +41,7 @@ Add the following dependency to your `pom.xml`:
 <dependency>
   <groupId>com.fathzer</groupId>
   <artifactId>health-tray</artifactId>
-  <version>0.0.1</version>
+  <version>0.0.2</version>
 </dependency>
 ```
 
@@ -381,7 +382,8 @@ point:
 - It shows a small heart icon that changes color (grey during initialization, then green or red).
 - **Clicking it** opens the status window (which has a "Quit" button to exit the application).
 - It has **no close button** — the only way to quit is via the status window's "Quit" button.
-- It can be **dragged** anywhere on the screen by clicking and holding.
+- It can be **dragged** anywhere on the screen by clicking and holding (releasing after a drag does
+  not trigger the click action).
 
 ### Automatic detection
 

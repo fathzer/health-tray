@@ -6,7 +6,7 @@
     <version>1.1.0</version>
   </parent>
   <artifactId>health-tray</artifactId>
-  <version>0.0.1</version>
+  <version>0.0.2</version>
 
   <properties>
 		<maven.compiler.source>17</maven.compiler.source>
@@ -63,12 +63,14 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <systemProperties>
+          <systemPropertyVariables>
             <property>
               <name>java.util.logging.config.file</name>
               <value>${project.build.testOutputDirectory}/logging.properties</value>
             </property>
-          </systemProperties>
+          </systemPropertyVariables>
+          <!-- Load Mockito as a javaagent to avoid the self-attach and dynamic-agent warnings. -->
+          <argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/5.23.0/mockito-core-5.23.0.jar</argLine>
         </configuration>
       </plugin>
     </plugins>

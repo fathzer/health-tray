@@ -23,6 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -331,6 +332,7 @@ public class HealthTray {
 		int originalHeight = Notify.Companion.getHEIGHT();
 		Notify.Companion.setHEIGHT(50);
 		try {
+			AtomicBoolean draggable = new AtomicBoolean();
 			Notify notify = Notify.Companion.create()
 					.title(title)
 					.text("")
@@ -338,11 +340,17 @@ public class HealthTray {
 					.position(Position.BOTTOM_RIGHT)
 					.hideCloseButton()
 					.onClickAction(n -> {
-						onClick.run();
+						// Notify fires on mouse press: defer to mouse release so that
+						// ending a drag does not open the status window.
+						if (draggable.get()) {
+							Dragger.onClick(onClick);
+						} else {
+							onClick.run();
+						}
 						return Unit.INSTANCE;
 					});
 			notify.show();
-			makeDraggable(notify);
+			draggable.set(makeDraggable(notify));
 			return notify;
 		} finally {
 			Notify.Companion.setHEIGHT(originalHeight);
@@ -355,18 +363,22 @@ public class HealthTray {
 	 * <BR>This must be called AFTER the notification has been shown (e.g. after {@code showInformation()},
 	 * {@code showError()}, etc.), so that the internal popup window exists.
 	 * @param notify the notification to make draggable.
+	 * @return true if the notification was made draggable, false if reflection failed.
 	 */
-	private static void makeDraggable(Notify notify) {
+	@SuppressWarnings("java:S3011")
+	private static boolean makeDraggable(Notify notify) {
 		try {
 			Field popupField = Notify.class.getDeclaredField("notifyPopup");
 			popupField.setAccessible(true);
 			Object popup = popupField.get(notify);
 			if (popup instanceof Window window) {
 				Dragger.attach(window);
+				return true;
 			}
 		} catch (NoSuchFieldException | IllegalAccessException e) {
 			LOGGER.log(Level.FINE, "Unable to make notification draggable (reflection failed)", e);
 		}
+		return false;
 	}
 
 	/** @return the list of task names that appear more than once, or an empty list if all names are unique. */

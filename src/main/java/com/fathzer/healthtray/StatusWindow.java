@@ -5,6 +5,10 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
 import java.awt.Frame;
+import java.awt.Cursor;
+import java.awt.FlowLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -24,6 +28,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.JTextArea;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
@@ -97,13 +102,15 @@ class StatusWindow implements AbstractCheckTask.Listener {
 			}
 			return 0;
 		});
-		sorter.setComparator(NAME_COL, Comparator.comparing(String::toString));
+		sorter.setComparator(NAME_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
 		sorter.setComparator(STATE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
 		sorter.setComparator(MESSAGE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
 		sorter.setComparator(PERIOD_COL, Comparator.comparing(o -> (Long) o));
 		sorter.setComparator(LAST_CHECK_COL, Comparator.nullsLast(Comparator.naturalOrder()));
 		sorter.setComparator(LAST_CHANGE_COL, Comparator.nullsLast(Comparator.naturalOrder()));
 		table.setRowSorter(sorter);
+
+		JPanel detailPanel = createMessageDetailPanel(table);
 
 		JButton restoreButton = new JButton("Restore alerts");
 		restoreButton.addActionListener(e -> restoreAction.run());
@@ -118,7 +125,10 @@ class StatusWindow implements AbstractCheckTask.Listener {
 
 		JPanel content = new JPanel(new BorderLayout(8, 8));
 		content.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-		content.add(new JScrollPane(table), BorderLayout.CENTER);
+		JPanel tableArea = new JPanel(new BorderLayout());
+		tableArea.add(new JScrollPane(table), BorderLayout.CENTER);
+		tableArea.add(detailPanel, BorderLayout.SOUTH);
+		content.add(tableArea, BorderLayout.CENTER);
 		content.add(bottom, BorderLayout.SOUTH);
 
 		this.frame = new JFrame(appName + " - Status");
@@ -130,6 +140,52 @@ class StatusWindow implements AbstractCheckTask.Listener {
 		for (AbstractCheckTask task : tasks) {
 			task.addListener(this);
 		}
+	}
+
+	/** Creates a scrollable panel showing the full message of the clicked task.
+	 * <BR>The panel is hidden until a message cell is clicked; the close box hides it again. */
+	private static JPanel createMessageDetailPanel(JTable table) {
+		JTextArea detailArea = new JTextArea(5, 20);
+		detailArea.setEditable(false);
+		detailArea.setLineWrap(true);
+		detailArea.setWrapStyleWord(true);
+		JScrollPane scrollPane = new JScrollPane(detailArea);
+		JPanel detailPanel = new JPanel(new BorderLayout());
+		detailPanel.setBorder(BorderFactory.createTitledBorder("Message details"));
+		// Discreet close box: a plain "×" label on a thin header strip, aligned right.
+		JLabel closeLabel = new JLabel("\u00D7");
+		closeLabel.setToolTipText("Close");
+		closeLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		closeLabel.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				detailPanel.setVisible(false);
+			}
+		});
+		JPanel header = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+		header.add(closeLabel);
+		detailPanel.add(header, BorderLayout.NORTH);
+		detailPanel.add(scrollPane, BorderLayout.CENTER);
+		detailPanel.setVisible(false);
+
+		table.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				int viewRow = table.rowAtPoint(e.getPoint());
+				if (viewRow < 0 || table.columnAtPoint(e.getPoint()) != MESSAGE_COL) {
+					return;
+				}
+				AbstractCheckTask task = getTaskAt(table, viewRow);
+				String message = task != null ? task.getMessage() : null;
+				if (message == null || message.isBlank()) {
+					return;
+				}
+				detailArea.setText(message);
+				detailArea.setCaretPosition(0);
+				detailPanel.setVisible(true);
+			}
+		});
+		return detailPanel;
 	}
 
 	/** Fixes the width of the State, Period, Last check and Last change columns to fit their content.

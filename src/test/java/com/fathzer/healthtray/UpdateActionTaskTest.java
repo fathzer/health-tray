@@ -106,7 +106,10 @@ class UpdateActionTaskTest {
 				() -> { throw new IOException("action failed"); },
 				60);
 
-		TaskResult result = task.run();
+		TaskResult result;
+		try (LogSilencer s = LogSilencer.silence(UpdateActionTask.class)) {
+			result = task.run();
+		}
 
 		assertEquals(Status.ERROR, result.type());
 		assertTrue(result.message().contains("action failed"), "Expected message to contain 'action failed', got: " + result.message());
