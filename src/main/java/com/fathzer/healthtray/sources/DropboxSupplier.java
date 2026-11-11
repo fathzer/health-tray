@@ -8,7 +8,6 @@ import com.dropbox.core.DbxException;
 import com.dropbox.core.v2.DbxClientV2;
 import com.dropbox.core.v2.files.FileMetadata;
 import com.dropbox.core.v2.files.Metadata;
-import com.fathzer.healthtray.sources.TimestampSupplier;
 
 /** A {@link TimestampSupplier} and {@link InputStreamSupplier} backed by a file on Dropbox.
  * <BR>The timestamp is the file's server-side last modification time, as reported by the

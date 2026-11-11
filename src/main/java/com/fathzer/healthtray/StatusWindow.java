@@ -102,7 +102,7 @@ class StatusWindow implements AbstractCheckTask.Listener {
 			}
 			return 0;
 		});
-		sorter.setComparator(NAME_COL, Comparator.comparing(String::toString));
+		sorter.setComparator(NAME_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
 		sorter.setComparator(STATE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
 		sorter.setComparator(MESSAGE_COL, Comparator.comparing(o -> o == null ? "" : o.toString()));
 		sorter.setComparator(PERIOD_COL, Comparator.comparing(o -> (Long) o));
